@@ -1,0 +1,460 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Store Product Exporter</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --text: #1b1f24; --muted: #5d6673;
+    --line: #e1e5ea; --accent: #0b7a75; --accent-ink: #ffffff; --danger: #b42318;
+    --danger-bg: #fdecea; --row-hover: #f2f8f8;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12161a; --card: #1a1f25; --text: #e8ebef; --muted: #98a2b0;
+      --line: #2b323b; --accent: #2ab3ac; --accent-ink: #06201f; --danger: #ff8b80;
+      --danger-bg: #3a1a17; --row-hover: #1f272e;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 1100px; margin: 0 auto; padding: 32px 16px 64px; }
+  h1 { font-size: 26px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 24px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 20px; }
+  .row { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
+  .field { display: flex; flex-direction: column; gap: 6px; }
+  .field.grow { flex: 1 1 280px; }
+  label { font-size: 13px; font-weight: 600; color: var(--muted); }
+  input[type=text], input[type=number], select {
+    height: 40px; padding: 0 12px; border: 1px solid var(--line); border-radius: 8px;
+    background: var(--bg); color: var(--text); font: inherit; min-width: 0; }
+  input:focus-visible, select:focus-visible, button:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 2px; }
+  button { height: 40px; padding: 0 18px; border-radius: 8px; border: 1px solid var(--line);
+    background: var(--card); color: var(--text); font: inherit; font-weight: 600; cursor: pointer; }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  button:disabled { opacity: .55; cursor: not-allowed; }
+  .hint { color: var(--muted); font-size: 13px; margin: 10px 0 0; }
+  #status { margin-top: 16px; min-height: 22px; }
+  .error { background: var(--danger-bg); color: var(--danger); padding: 10px 14px; border-radius: 8px; }
+  .info { color: var(--muted); }
+  #results { margin-top: 20px; display: none; }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+  .toolbar .left { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  .count { font-weight: 600; }
+  .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; }
+  table { border-collapse: collapse; width: 100%; min-width: 720px; }
+  th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  th { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); background: var(--bg); position: sticky; top: 0; }
+  tbody tr:hover { background: var(--row-hover); }
+  tbody tr:last-child td { border-bottom: 0; }
+  td.num { white-space: nowrap; }
+  .thumb { width: 44px; height: 44px; object-fit: cover; border-radius: 6px; background: var(--line); display: block; }
+  .title a { color: var(--text); text-decoration: none; font-weight: 600; }
+  .title a:hover { text-decoration: underline; }
+  .badge { font-size: 12px; padding: 2px 8px; border-radius: 99px; border: 1px solid var(--line); color: var(--muted); }
+  .badge.ok { color: var(--accent); border-color: var(--accent); }
+  .note { color: var(--muted); font-size: 13px; padding: 10px 12px; }
+  .opts { display: flex; flex-wrap: wrap; gap: 8px 28px; margin-top: 14px; }
+  .check { display: flex; gap: 8px; align-items: flex-start; font-size: 14px; font-weight: 500; color: var(--text); cursor: pointer; }
+  .check input { margin-top: 4px; }
+  .check small { color: var(--muted); font-weight: 400; }
+  #progressRow { display: flex; gap: 12px; align-items: center; margin-top: 8px; }
+  .bar { flex: 1; height: 8px; background: var(--line); border-radius: 99px; overflow: hidden; }
+  .fill { height: 100%; width: 0; background: var(--accent); transition: width .3s; }
+  .fill.indeterminate { width: 35%; animation: slide 1.2s ease-in-out infinite; }
+  @keyframes slide { 0% { margin-left: -35%; } 100% { margin-left: 100%; } }
+  .warn { color: var(--muted); font-size: 13px; margin-top: 6px; }
+  .cols { color: var(--muted); font-size: 13px; max-width: 220px; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Store Product Exporter</h1>
+  <p class="sub">Enter a Shopify or WooCommerce store, preview its public products, and export them as a CSV for Shopify or WooCommerce.</p>
+
+  <form id="form" class="card" autocomplete="off">
+    <div class="row">
+      <div class="field grow">
+        <label for="store">Store domain</label>
+        <input id="store" type="text" placeholder="example-store.com" spellcheck="false" required>
+      </div>
+      <div class="field">
+        <label for="platform">Platform</label>
+        <select id="platform">
+          <option value="auto">Auto-detect</option>
+          <option value="shopify">Shopify</option>
+          <option value="woocommerce">WooCommerce</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="scope">What to fetch</label>
+        <select id="scope">
+          <option value="all">All products</option>
+          <option value="collection">A collection / category</option>
+          <option value="pages">Products by page</option>
+        </select>
+      </div>
+      <div class="field" id="collectionField" hidden>
+        <label for="collection">Collection / category</label>
+        <select id="collection"><option value="">Load collections…</option></select>
+      </div>
+      <div class="field" id="pagesField" hidden>
+        <label>Pages (250 per page on Shopify, 100 on WooCommerce)</label>
+        <div class="row" style="gap:8px">
+          <input id="pageFrom" type="number" min="1" value="1" style="width:80px" aria-label="From page">
+          <span>to</span>
+          <input id="pageTo" type="number" min="1" value="1" style="width:80px" aria-label="To page">
+        </div>
+      </div>
+      <button class="primary" id="searchBtn" type="submit">Search</button>
+    </div>
+    <div class="opts">
+      <label class="check"><input type="checkbox" id="optCollections" checked>
+        <span>Include collections <small>(Shopify: maps every product to its collections. WooCommerce: reads the category tree so categories keep their parents)</small></span></label>
+      <label class="check"><input type="checkbox" id="optVariations" checked>
+        <span>Variation prices and SKUs <small>(WooCommerce: one request per variable product; turn off for a faster, simpler scrape)</small></span></label>
+      <label class="check"><input type="checkbox" id="optDeep">
+        <span>Deep details <small>(SEO title and description, structured data, barcodes, videos, and on WooCommerce weight and dimensions; slower, one extra request per product)</small></span></label>
+    </div>
+    <p class="hint">There is no limit on the number of products. Only publicly visible data is available: stores don't expose inventory counts, so stock is an in-stock / out-of-stock flag.</p>
+  </form>
+
+  <div id="status" role="status" aria-live="polite"></div>
+  <div id="progressRow" hidden>
+    <div class="bar"><div id="barFill" class="fill"></div></div>
+    <button id="stopBtn" type="button">Stop and keep what's fetched</button>
+  </div>
+
+  <section id="results" class="card">
+    <div class="toolbar">
+      <div class="left">
+        <span class="count" id="count"></span>
+        <input id="filter" type="text" placeholder="Filter by title, vendor, type…" style="width:260px" aria-label="Filter products">
+      </div>
+      <div class="left">
+        <button id="expFull" type="button" class="primary" title="Every detail, one row per variant">Full details CSV</button>
+        <button id="expShopify" type="button">Shopify CSV</button>
+        <button id="expWoo" type="button">WooCommerce CSV</button>
+        <button id="expJson" type="button">JSON</button>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th style="width:36px"><input type="checkbox" id="selectAll" aria-label="Select all shown products"></th>
+            <th style="width:64px"></th>
+            <th>Product</th>
+            <th>Vendor</th>
+            <th>Type</th>
+            <th>Collections / categories</th>
+            <th>Price</th>
+            <th>Variants</th>
+            <th>Stock</th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+    <div class="note" id="capNote" hidden></div>
+  </section>
+</main>
+
+<script>
+(function () {
+  "use strict";
+  var MAX_ROWS = 500;
+  var $ = function (id) { return document.getElementById(id); };
+  var state = { token: null, products: [], selected: new Set(), filtered: [] };
+  var collectionsFor = null;
+
+  function el(tag, props, children) {
+    var node = document.createElement(tag);
+    Object.keys(props || {}).forEach(function (k) {
+      if (k === "text") node.textContent = props[k];
+      else if (k === "class") node.className = props[k];
+      else node.setAttribute(k, props[k]);
+    });
+    (children || []).forEach(function (c) { node.appendChild(c); });
+    return node;
+  }
+
+  function setStatus(message, isError) {
+    var s = $("status");
+    s.textContent = "";
+    if (message) s.appendChild(el("div", { class: isError ? "error" : "info", text: message }));
+  }
+
+  function api(path, options) {
+    return fetch(path, options).then(function (res) {
+      var type = res.headers.get("content-type") || "";
+      if (type.indexOf("application/json") !== -1 && !res.ok) {
+        return res.json().then(function (d) { throw new Error(d.error || "Request failed."); });
+      }
+      if (!res.ok) throw new Error("Request failed (" + res.status + ").");
+      return res;
+    });
+  }
+
+  function postJson(path, body) {
+    return api(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    });
+  }
+
+  function updateScopeUi() {
+    var scope = $("scope").value;
+    $("collectionField").hidden = scope !== "collection";
+    $("pagesField").hidden = scope !== "pages";
+    if (scope === "collection") loadCollections();
+  }
+
+  function loadCollections() {
+    var store = $("store").value.trim();
+    var key = store + "|" + $("platform").value;
+    if (!store || collectionsFor === key) return;
+    var sel = $("collection");
+    sel.textContent = "";
+    sel.appendChild(el("option", { value: "", text: "Loading…" }));
+    api("/api/collections?store=" + encodeURIComponent(store) + "&platform=" + encodeURIComponent($("platform").value))
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        collectionsFor = key;
+        sel.textContent = "";
+        if (!d.collections.length) {
+          sel.appendChild(el("option", { value: "", text: "No collections found" }));
+          return;
+        }
+        d.collections.forEach(function (c) {
+          var label = c.title + (c.products_count != null ? " (" + c.products_count + ")" : "");
+          sel.appendChild(el("option", { value: c.handle, text: label }));
+        });
+      })
+      .catch(function (e) {
+        sel.textContent = "";
+        sel.appendChild(el("option", { value: "", text: "Couldn't load collections" }));
+        setStatus(e.message, true);
+      });
+  }
+
+  function money(n) {
+    return n == null ? "" : n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  function priceText(p) {
+    if (p.price_min == null) return "";
+    return p.price_min === p.price_max ? money(p.price_min) : money(p.price_min) + " – " + money(p.price_max);
+  }
+
+  function applyFilter() {
+    var q = $("filter").value.trim().toLowerCase();
+    state.filtered = !q ? state.products : state.products.filter(function (p) {
+      return (p.title + " " + p.vendor + " " + p.product_type).toLowerCase().indexOf(q) !== -1;
+    });
+    render();
+  }
+
+  function render() {
+    var body = $("rows");
+    body.textContent = "";
+    var shown = state.filtered.slice(0, MAX_ROWS);
+    shown.forEach(function (p) {
+      var cb = el("input", { type: "checkbox", "aria-label": "Select " + p.title });
+      cb.checked = state.selected.has(p.id);
+      cb.addEventListener("change", function () {
+        if (cb.checked) state.selected.add(p.id); else state.selected.delete(p.id);
+        updateCount();
+      });
+      var img = p.image
+        ? el("img", { class: "thumb", src: p.image, alt: "", loading: "lazy", referrerpolicy: "no-referrer" })
+        : el("div", { class: "thumb" });
+      var titleCell = el("td", { class: "title" });
+      if (p.url) titleCell.appendChild(el("a", { href: p.url, target: "_blank", rel: "noopener noreferrer", text: p.title }));
+      else titleCell.textContent = p.title;
+      var stock = el("span", { class: "badge" + (p.available ? " ok" : ""), text: p.available ? "In stock" : "Out of stock" });
+      body.appendChild(el("tr", {}, [
+        el("td", {}, [cb]),
+        el("td", {}, [img]),
+        titleCell,
+        el("td", { text: p.vendor }),
+        el("td", { text: p.product_type }),
+        el("td", { class: "cols", text: (p.collections || []).join(", ") }),
+        el("td", { class: "num", text: priceText(p) }),
+        el("td", { class: "num", text: String(p.variants) }),
+        el("td", {}, [stock])
+      ]));
+    });
+    var note = $("capNote");
+    if (state.filtered.length > MAX_ROWS) {
+      note.hidden = false;
+      note.textContent = "Showing the first " + MAX_ROWS + " of " + state.filtered.length +
+        " matching products. Exports include every selected product, not just those shown.";
+    } else {
+      note.hidden = true;
+    }
+    var all = $("selectAll");
+    all.checked = shown.length > 0 && shown.every(function (p) { return state.selected.has(p.id); });
+    updateCount();
+  }
+
+  function updateCount() {
+    $("count").textContent = state.selected.size + " of " + state.products.length + " products selected";
+    var none = state.selected.size === 0;
+    ["expFull", "expShopify", "expWoo", "expJson"].forEach(function (id) { $(id).disabled = none; });
+  }
+
+  function doExport(format, button) {
+    if (!state.token) return;
+    var ids = state.selected.size === state.products.length ? null : Array.from(state.selected);
+    button.disabled = true;
+    setStatus("Preparing export…", false);
+    postJson("/api/export", { token: state.token, ids: ids, format: format })
+      .then(function (res) {
+        var disposition = res.headers.get("content-disposition") || "";
+        var m = /filename="([^"]+)"/.exec(disposition);
+        var name = m ? m[1] : "products." + (format === "json" ? "json" : "csv");
+        return res.blob().then(function (blob) { return { blob: blob, name: name }; });
+      })
+      .then(function (f) {
+        var url = URL.createObjectURL(f.blob);
+        var a = el("a", { href: url, download: f.name });
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+        setStatus("Downloaded " + f.name, false);
+      })
+      .catch(function (e) { setStatus(e.message, true); })
+      .then(function () { updateCount(); });
+  }
+
+  var pollTimer = null;
+  var currentJob = null;
+
+  function stopPolling() {
+    if (pollTimer) clearTimeout(pollTimer);
+    pollTimer = null;
+    currentJob = null;
+    $("progressRow").hidden = true;
+    $("searchBtn").disabled = false;
+  }
+
+  function showResult(d) {
+    state.token = d.token;
+    state.products = d.products;
+    state.selected = new Set(d.products.map(function (p) { return p.id; }));
+    $("filter").value = "";
+    $("results").style.display = "block";
+    applyFilter();
+  }
+
+  function renderProgress(job) {
+    var p = job.progress || {};
+    var fill = $("barFill");
+    var pct = null;
+    if (job.phase === "collections" && p.collections_total) pct = 100 * p.collections_done / p.collections_total;
+    if (job.phase === "variations" && p.variations_total) pct = 100 * p.variations_done / p.variations_total;
+    if (job.phase === "details" && p.details_total) pct = 100 * p.details_done / p.details_total;
+    if (pct === null) {
+      fill.className = "fill indeterminate";
+      fill.style.width = "";
+    } else {
+      fill.className = "fill";
+      fill.style.width = pct + "%";
+    }
+    setStatus(job.message, false);
+  }
+
+  function showWarnings(list) {
+    (list || []).forEach(function (w) { $("status").appendChild(el("div", { class: "warn", text: w })); });
+  }
+
+  function poll(jobId) {
+    api("/api/job/" + encodeURIComponent(jobId))
+      .then(function (r) { return r.json(); })
+      .then(function (job) {
+        if (currentJob !== jobId) return;
+        if (job.status === "running") {
+          renderProgress(job);
+          pollTimer = setTimeout(function () { poll(jobId); }, 1000);
+          return;
+        }
+        stopPolling();
+        if (job.result && job.result.count) showResult(job.result);
+        if (job.status === "error") {
+          setStatus(job.error + (job.result ? " Showing the " + job.result.count + " products fetched before the error." : ""), true);
+        } else {
+          var r = job.result;
+          var label = r.platform === "woocommerce" ? "WooCommerce" : "Shopify";
+          setStatus("Found " + r.count + " " + label + " products" + (r.stopped_early ? " (stopped early)." : "."), false);
+        }
+        showWarnings(job.warnings);
+      })
+      .catch(function (e) { stopPolling(); setStatus(e.message, true); });
+  }
+
+  $("form").addEventListener("submit", function (ev) {
+    ev.preventDefault();
+    $("searchBtn").disabled = true;
+    $("results").style.display = "none";
+    setStatus("Starting…", false);
+    postJson("/api/search", {
+      store: $("store").value,
+      scope: $("scope").value,
+      collection: $("collection").value,
+      page_from: $("pageFrom").value,
+      page_to: $("pageTo").value,
+      platform: $("platform").value,
+      variations: $("optVariations").checked,
+      include_collections: $("optCollections").checked,
+      deep: $("optDeep").checked
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        currentJob = d.job_id;
+        $("progressRow").hidden = false;
+        $("stopBtn").disabled = false;
+        poll(d.job_id);
+      })
+      .catch(function (e) { stopPolling(); setStatus(e.message, true); });
+  });
+
+  $("stopBtn").addEventListener("click", function () {
+    if (!currentJob) return;
+    this.disabled = true;
+    setStatus("Stopping…", false);
+    api("/api/job/" + encodeURIComponent(currentJob) + "/stop", { method: "POST" }).catch(function () {});
+  });
+
+  $("scope").addEventListener("change", updateScopeUi);
+  $("store").addEventListener("input", function () { collectionsFor = null; });
+  $("platform").addEventListener("change", function () {
+    collectionsFor = null;
+    if ($("scope").value === "collection") loadCollections();
+  });
+  $("store").addEventListener("change", function () {
+    if ($("scope").value === "collection") loadCollections();
+  });
+  $("filter").addEventListener("input", applyFilter);
+  $("selectAll").addEventListener("change", function () {
+    var on = this.checked;
+    state.filtered.slice(0, MAX_ROWS).forEach(function (p) {
+      if (on) state.selected.add(p.id); else state.selected.delete(p.id);
+    });
+    render();
+  });
+  $("expFull").addEventListener("click", function () { doExport("full", this); });
+  $("expShopify").addEventListener("click", function () { doExport("shopify", this); });
+  $("expWoo").addEventListener("click", function () { doExport("woocommerce", this); });
+  $("expJson").addEventListener("click", function () { doExport("json", this); });
+})();
+</script>
+</body>
+</html>
