@@ -5,154 +5,250 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Store Product Exporter</title>
 <style>
+  /* Palette: stockroom grey, deep navy ink, one cobalt for the action that matters.
+     Green and violet are reserved for the two platforms and nothing else. */
   :root {
-    --bg: #f6f7f9; --card: #ffffff; --text: #1b1f24; --muted: #5d6673;
-    --line: #e1e5ea; --accent: #0b7a75; --accent-ink: #ffffff; --danger: #b42318;
-    --danger-bg: #fdecea; --row-hover: #f2f8f8;
+    --bg: #eceff3; --surface: #f9fafb; --ink: #0c1a2e; --muted: #56647a;
+    --line: #d3d9e2; --line-strong: #aeb8c7;
+    --action: #2243e6; --action-ink: #ffffff; --action-soft: #dfe5fc;
+    --shopify: #2f7d3a; --woo: #7a3fb3;
+    --danger: #b3261e; --danger-bg: #fbe5e3; --ok: #1d6b34;
+    --focus: #2243e6;
+    --font: "Avenir Next", "Segoe UI Variable Display", "Segoe UI", Inter, system-ui, -apple-system, Roboto, sans-serif;
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --bg: #12161a; --card: #1a1f25; --text: #e8ebef; --muted: #98a2b0;
-      --line: #2b323b; --accent: #2ab3ac; --accent-ink: #06201f; --danger: #ff8b80;
-      --danger-bg: #3a1a17; --row-hover: #1f272e;
+      --bg: #0b1320; --surface: #121c2c; --ink: #eaf0fa; --muted: #93a2ba;
+      --line: #25324a; --line-strong: #3b4c6b;
+      --action: #6f8bff; --action-ink: #08112b; --action-soft: #1c2a56;
+      --shopify: #6ccb7a; --woo: #bf93f0;
+      --danger: #ff9a92; --danger-bg: #3a1b19; --ok: #7bd68f; --focus: #8fa5ff;
     }
   }
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--text);
-    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
-  main { max-width: 1100px; margin: 0 auto; padding: 32px 16px 64px; }
-  h1 { font-size: 26px; margin: 0 0 4px; }
-  .sub { color: var(--muted); margin: 0 0 24px; }
-  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 20px; }
-  .row { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
-  .field { display: flex; flex-direction: column; gap: 6px; }
-  .field.grow { flex: 1 1 280px; }
-  label { font-size: 13px; font-weight: 600; color: var(--muted); }
-  input[type=text], input[type=number], select {
-    height: 40px; padding: 0 12px; border: 1px solid var(--line); border-radius: 8px;
-    background: var(--bg); color: var(--text); font: inherit; min-width: 0; }
-  input:focus-visible, select:focus-visible, button:focus-visible {
-    outline: 2px solid var(--accent); outline-offset: 2px; }
-  button { height: 40px; padding: 0 18px; border-radius: 8px; border: 1px solid var(--line);
-    background: var(--card); color: var(--text); font: inherit; font-weight: 600; cursor: pointer; }
-  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
-  button:disabled { opacity: .55; cursor: not-allowed; }
-  .hint { color: var(--muted); font-size: 13px; margin: 10px 0 0; }
-  #status { margin-top: 16px; min-height: 22px; }
-  .error { background: var(--danger-bg); color: var(--danger); padding: 10px 14px; border-radius: 8px; }
-  .info { color: var(--muted); }
-  #results { margin-top: 20px; display: none; }
-  .toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; margin-bottom: 14px; }
-  .toolbar .left { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
-  .count { font-weight: 600; }
-  .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; }
-  table { border-collapse: collapse; width: 100%; min-width: 720px; }
-  th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--line); vertical-align: middle; }
-  th { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); background: var(--bg); position: sticky; top: 0; }
-  tbody tr:hover { background: var(--row-hover); }
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.55 var(--font); }
+  main { max-width: 1120px; margin: 0 auto; padding: clamp(28px, 6vw, 72px) 20px 120px; }
+  :focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+  [hidden] { display: none !important; }
+
+  /* ---- hero: the address bar is the page ---- */
+  .masthead { display: flex; align-items: center; gap: 10px; margin: 0 0 clamp(28px, 5vw, 56px); font-weight: 700; letter-spacing: -.01em; }
+  .mark { width: 26px; height: 26px; border-radius: 7px; background: var(--ink); position: relative; flex: none; }
+  .mark::before, .mark::after { content: ""; position: absolute; left: 6px; right: 6px; height: 3px; border-radius: 2px; background: var(--bg); }
+  .mark::before { top: 8px; } .mark::after { top: 14px; right: 11px; }
+  h1 { font-size: clamp(2.2rem, 6.2vw, 4.4rem); line-height: 1.02; letter-spacing: -.035em; font-weight: 800; margin: 0 0 18px; max-width: 15ch; }
+  .lede { font-size: 1.125rem; color: var(--muted); max-width: 56ch; margin: 0 0 clamp(24px, 4vw, 40px); }
+  .lede strong { color: var(--ink); font-weight: 650; }
+
+  .address { display: flex; align-items: stretch; background: var(--surface); border: 2px solid var(--ink);
+    border-radius: 14px; box-shadow: 6px 6px 0 var(--ink); overflow: hidden; }
+  .address:focus-within { border-color: var(--action); box-shadow: 6px 6px 0 var(--action); }
+  .address label { display: flex; align-items: center; padding: 0 0 0 18px; color: var(--muted); font-weight: 600; white-space: nowrap; }
+  .address input { flex: 1; min-width: 0; border: 0; background: transparent; color: var(--ink);
+    font: inherit; font-size: clamp(1.05rem, 2.6vw, 1.5rem); font-weight: 600; letter-spacing: -.01em; padding: 20px 12px; outline: none; }
+  .address input::placeholder { color: var(--line-strong); font-weight: 500; }
+  .address .go { border: 0; border-radius: 0; background: var(--ink); color: var(--bg); font: inherit; font-weight: 700;
+    font-size: 1.05rem; padding: 0 clamp(18px, 4vw, 34px); cursor: pointer; }
+  .address .go:hover:not(:disabled) { background: var(--action); color: var(--action-ink); }
+  .address .go:disabled { opacity: .5; cursor: progress; }
+  .address:focus-within .go { background: var(--action); color: var(--action-ink); }
+
+  /* ---- scope + options ---- */
+  .controls { margin-top: 32px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 28px 48px; }
+  .group h2 { font-size: 1rem; font-weight: 700; margin: 0 0 12px; letter-spacing: -.005em; }
+  .selects { display: flex; flex-wrap: wrap; gap: 12px; }
+  .field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+  .field > span, .field > label { font-size: .875rem; color: var(--muted); font-weight: 550; }
+  select, input[type=number], .filter {
+    height: 44px; padding: 0 14px; border: 1.5px solid var(--line-strong); border-radius: 10px;
+    background: var(--surface); color: var(--ink); font: inherit; font-weight: 550; min-width: 0; }
+  select { padding-right: 34px; appearance: none; -webkit-appearance: none;
+    background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+    background-position: calc(100% - 18px) 19px, calc(100% - 13px) 19px; background-size: 5px 5px; background-repeat: no-repeat; }
+  select:hover, input[type=number]:hover, .filter:hover { border-color: var(--ink); }
+  .pages { display: flex; align-items: center; gap: 8px; }
+  .pages input { width: 84px; }
+  .pages span { color: var(--muted); }
+
+  .toggles { display: grid; gap: 10px; }
+  .toggle { display: grid; grid-template-columns: 22px 1fr; gap: 12px; cursor: pointer; align-items: start; }
+  .toggle input { appearance: none; -webkit-appearance: none; width: 22px; height: 22px; margin: 1px 0 0; border: 1.5px solid var(--line-strong);
+    border-radius: 6px; background: var(--surface); display: grid; place-content: center; cursor: pointer; }
+  .toggle input::before { content: ""; width: 10px; height: 6px; border: 3px solid var(--action-ink); border-top: 0; border-right: 0;
+    transform: rotate(-45deg) translate(1px, -1px); opacity: 0; }
+  .toggle input:checked { background: var(--action); border-color: var(--action); }
+  .toggle input:checked::before { opacity: 1; }
+  .toggle b { display: block; font-weight: 650; line-height: 1.3; }
+  .toggle small { display: block; color: var(--muted); font-size: .875rem; line-height: 1.4; margin-top: 2px; }
+  .fineprint { color: var(--muted); font-size: .875rem; margin: 28px 0 0; max-width: 70ch; }
+
+  /* ---- status + phases ---- */
+  #status { margin-top: 28px; }
+  #status:empty { display: none; }
+  .error { background: var(--danger-bg); color: var(--danger); padding: 14px 16px; border-radius: 10px; border-left: 5px solid var(--danger); font-weight: 550; }
+  .info { color: var(--ink); font-weight: 550; }
+  .warn { color: var(--muted); font-size: .9rem; margin-top: 8px; padding-left: 12px; border-left: 3px solid var(--line-strong); }
+  #progressRow { margin-top: 14px; display: grid; gap: 14px; }
+  .phases { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
+  .phases li { padding: 5px 12px; border-radius: 99px; border: 1.5px solid var(--line-strong); color: var(--muted); font-size: .875rem; font-weight: 600; }
+  .phases li.done { border-color: var(--ok); color: var(--ok); }
+  .phases li.done::before { content: "\2713\00a0"; }
+  .phases li.current { background: var(--ink); border-color: var(--ink); color: var(--bg); }
+  .bar { height: 6px; background: var(--line); border-radius: 99px; overflow: hidden; }
+  .fill { height: 100%; width: 0; background: var(--action); transition: width .3s; }
+  .fill.indeterminate { width: 30%; animation: slide 1.3s ease-in-out infinite; }
+  @keyframes slide { 0% { margin-left: -30%; } 100% { margin-left: 100%; } }
+  .stop { justify-self: start; height: 40px; padding: 0 16px; border-radius: 10px; border: 1.5px solid var(--ink); background: transparent; color: var(--ink); font: inherit; font-weight: 650; cursor: pointer; }
+  .stop:hover:not(:disabled) { background: var(--ink); color: var(--bg); }
+  .stop:disabled { opacity: .5; cursor: default; }
+
+  /* ---- what you get (hidden once results arrive) ---- */
+  .inventory { margin-top: clamp(40px, 7vw, 80px); border-top: 2px solid var(--ink); padding-top: 24px;
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 24px 32px; }
+  .inventory h2 { font-size: 1rem; margin: 0 0 6px; }
+  .inventory p { margin: 0; color: var(--muted); font-size: .95rem; }
+
+  /* ---- results ---- */
+  #results { margin-top: 40px; display: none; }
+  .results-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 12px 24px; margin-bottom: 14px; }
+  .results-head h2 { margin: 0; font-size: clamp(1.4rem, 3vw, 2rem); letter-spacing: -.025em; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .chip { font-size: .8rem; font-weight: 700; padding: 3px 10px; border-radius: 99px; border: 1.5px solid currentColor; letter-spacing: 0; }
+  .chip.shopify { color: var(--shopify); } .chip.woocommerce { color: var(--woo); }
+  .count { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .filter { width: min(100%, 300px); }
+  .table-wrap { overflow-x: auto; border: 2px solid var(--ink); border-radius: 14px; background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; min-width: 760px; font-variant-numeric: tabular-nums; }
+  th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  th { font-size: .85rem; font-weight: 650; color: var(--muted); background: var(--bg); position: sticky; top: 0; white-space: nowrap; border-bottom: 2px solid var(--ink); }
+  tbody tr:hover { background: var(--action-soft); }
   tbody tr:last-child td { border-bottom: 0; }
   td.num { white-space: nowrap; }
-  .thumb { width: 44px; height: 44px; object-fit: cover; border-radius: 6px; background: var(--line); display: block; }
-  .title a { color: var(--text); text-decoration: none; font-weight: 600; }
-  .title a:hover { text-decoration: underline; }
-  .badge { font-size: 12px; padding: 2px 8px; border-radius: 99px; border: 1px solid var(--line); color: var(--muted); }
-  .badge.ok { color: var(--accent); border-color: var(--accent); }
-  .note { color: var(--muted); font-size: 13px; padding: 10px 12px; }
-  .opts { display: flex; flex-wrap: wrap; gap: 8px 28px; margin-top: 14px; }
-  .check { display: flex; gap: 8px; align-items: flex-start; font-size: 14px; font-weight: 500; color: var(--text); cursor: pointer; }
-  .check input { margin-top: 4px; }
-  .check small { color: var(--muted); font-weight: 400; }
-  #progressRow { display: flex; gap: 12px; align-items: center; margin-top: 8px; }
-  .bar { flex: 1; height: 8px; background: var(--line); border-radius: 99px; overflow: hidden; }
-  .fill { height: 100%; width: 0; background: var(--accent); transition: width .3s; }
-  .fill.indeterminate { width: 35%; animation: slide 1.2s ease-in-out infinite; }
-  @keyframes slide { 0% { margin-left: -35%; } 100% { margin-left: 100%; } }
-  .warn { color: var(--muted); font-size: 13px; margin-top: 6px; }
-  .cols { color: var(--muted); font-size: 13px; max-width: 220px; }
-  [hidden] { display: none !important; }
+  td input[type=checkbox], th input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--action); }
+  .thumb { width: 48px; height: 48px; object-fit: cover; border-radius: 8px; background: var(--line); display: block; }
+  .title a { color: var(--ink); text-decoration: none; font-weight: 650; }
+  .title a:hover { text-decoration: underline; text-underline-offset: 3px; }
+  .cols { color: var(--muted); font-size: .875rem; max-width: 220px; }
+  .badge { font-size: .8rem; font-weight: 650; padding: 2px 9px; border-radius: 99px; border: 1.5px solid var(--line-strong); color: var(--muted); white-space: nowrap; }
+  .badge.ok { color: var(--ok); border-color: var(--ok); }
+  .note { color: var(--muted); font-size: .9rem; padding: 12px 14px; }
+
+  /* ---- export dock ---- */
+  .dock { position: sticky; bottom: 16px; margin-top: 20px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px;
+    background: var(--ink); color: var(--bg); border-radius: 16px; padding: 14px 18px; box-shadow: 0 10px 30px rgba(8, 16, 32, .28); }
+  .dock .sel { font-weight: 650; margin-right: auto; font-variant-numeric: tabular-nums; }
+  .dock .formats { display: flex; flex-wrap: wrap; gap: 8px; }
+  .dock button { height: 44px; padding: 0 16px; border-radius: 10px; border: 1.5px solid color-mix(in srgb, var(--bg) 45%, transparent);
+    background: transparent; color: var(--bg); font: inherit; font-weight: 650; cursor: pointer; }
+  .dock button:hover:not(:disabled) { border-color: var(--bg); }
+  .dock button.primary { background: var(--action); border-color: var(--action); color: var(--action-ink); }
+  .dock button.primary:hover:not(:disabled) { filter: brightness(1.08); }
+  .dock button:disabled { opacity: .4; cursor: not-allowed; }
+  .dock :focus-visible { outline-color: var(--bg); }
+
+  @media (max-width: 760px) {
+    .controls { grid-template-columns: 1fr; }
+    .address { flex-wrap: wrap; box-shadow: 4px 4px 0 var(--ink); }
+    .address label { padding: 14px 18px 0; width: 100%; }
+    .address input { padding: 8px 18px 18px; flex-basis: 100%; }
+    .address .go { width: 100%; height: 54px; }
+    .dock { position: static; }
+  }
+  @media (prefers-reduced-motion: reduce) { .fill.indeterminate { animation: none; width: 100%; opacity: .5; } .fill { transition: none; } }
 </style>
 </head>
 <body>
 <main>
-  <h1>Store Product Exporter</h1>
-  <p class="sub">Enter a Shopify or WooCommerce store, preview its public products, and export them as a CSV for Shopify or WooCommerce.</p>
+  <p class="masthead"><span class="mark" aria-hidden="true"></span>Store Product Exporter</p>
+  <h1>Paste a store. Get the whole catalogue.</h1>
+  <p class="lede">Works on <strong>Shopify</strong> and <strong>WooCommerce</strong> stores. Titles, images, variations, prices, categories and more, exported as CSV or JSON. No limit on the number of products.</p>
 
-  <form id="form" class="card" autocomplete="off">
-    <div class="row">
-      <div class="field grow">
-        <label for="store">Store domain</label>
-        <input id="store" type="text" placeholder="example-store.com" spellcheck="false" required>
-      </div>
-      <div class="field">
-        <label for="platform">Platform</label>
-        <select id="platform">
-          <option value="auto">Auto-detect</option>
-          <option value="shopify">Shopify</option>
-          <option value="woocommerce">WooCommerce</option>
-        </select>
-      </div>
-      <div class="field">
-        <label for="scope">What to fetch</label>
-        <select id="scope">
-          <option value="all">All products</option>
-          <option value="collection">A collection / category</option>
-          <option value="pages">Products by page</option>
-        </select>
-      </div>
-      <div class="field" id="collectionField" hidden>
-        <label for="collection">Collection / category</label>
-        <select id="collection"><option value="">Load collections…</option></select>
-      </div>
-      <div class="field" id="pagesField" hidden>
-        <label>Pages (250 per page on Shopify, 100 on WooCommerce)</label>
-        <div class="row" style="gap:8px">
-          <input id="pageFrom" type="number" min="1" value="1" style="width:80px" aria-label="From page">
-          <span>to</span>
-          <input id="pageTo" type="number" min="1" value="1" style="width:80px" aria-label="To page">
+  <form id="form" autocomplete="off">
+    <div class="address">
+      <label for="store">Store</label>
+      <input id="store" type="text" placeholder="example-store.com" spellcheck="false" autocapitalize="off" required>
+      <button class="go" id="searchBtn" type="submit">Find products</button>
+    </div>
+
+    <div class="controls">
+      <div class="group">
+        <h2>What to fetch</h2>
+        <div class="selects">
+          <div class="field">
+            <label for="platform">Platform</label>
+            <select id="platform">
+              <option value="auto">Auto-detect</option>
+              <option value="shopify">Shopify</option>
+              <option value="woocommerce">WooCommerce</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="scope">Scope</label>
+            <select id="scope">
+              <option value="all">All products</option>
+              <option value="collection">One collection or category</option>
+              <option value="pages">A range of pages</option>
+            </select>
+          </div>
+          <div class="field" id="collectionField" hidden>
+            <label for="collection">Collection or category</label>
+            <select id="collection"><option value="">Load collections…</option></select>
+          </div>
+          <div class="field" id="pagesField" hidden>
+            <span id="pagesLabel">Pages (250 per page on Shopify, 100 on WooCommerce)</span>
+            <div class="pages" role="group" aria-labelledby="pagesLabel">
+              <input id="pageFrom" type="number" min="1" value="1" aria-label="From page">
+              <span>to</span>
+              <input id="pageTo" type="number" min="1" value="1" aria-label="To page">
+            </div>
+          </div>
         </div>
       </div>
-      <button class="primary" id="searchBtn" type="submit">Search</button>
+
+      <div class="group">
+        <h2>Extra detail</h2>
+        <div class="toggles">
+          <label class="toggle"><input type="checkbox" id="optCollections" checked>
+            <span><b>Collections and categories</b><small>Shopify: maps each product to its collections. WooCommerce: keeps the category tree with parents.</small></span></label>
+          <label class="toggle"><input type="checkbox" id="optVariations" checked>
+            <span><b>Variation prices and SKUs</b><small>WooCommerce only. One request per variable product; turn off for a faster scrape.</small></span></label>
+          <label class="toggle"><input type="checkbox" id="optDeep">
+            <span><b>Deep details</b><small>SEO title and description, structured data, barcodes, videos, and on WooCommerce weight and dimensions. Slower: one extra request per product.</small></span></label>
+        </div>
+      </div>
     </div>
-    <div class="opts">
-      <label class="check"><input type="checkbox" id="optCollections" checked>
-        <span>Include collections <small>(Shopify: maps every product to its collections. WooCommerce: reads the category tree so categories keep their parents)</small></span></label>
-      <label class="check"><input type="checkbox" id="optVariations" checked>
-        <span>Variation prices and SKUs <small>(WooCommerce: one request per variable product; turn off for a faster, simpler scrape)</small></span></label>
-      <label class="check"><input type="checkbox" id="optDeep">
-        <span>Deep details <small>(SEO title and description, structured data, barcodes, videos, and on WooCommerce weight and dimensions; slower, one extra request per product)</small></span></label>
-    </div>
-    <p class="hint">There is no limit on the number of products. Only publicly visible data is available: stores don't expose inventory counts, so stock is an in-stock / out-of-stock flag.</p>
+    <p class="fineprint">Only public data is available. Stores don't expose inventory counts, so stock shows as in stock or out of stock.</p>
   </form>
 
   <div id="status" role="status" aria-live="polite"></div>
   <div id="progressRow" hidden>
-    <div class="bar"><div id="barFill" class="fill"></div></div>
-    <button id="stopBtn" type="button">Stop and keep what's fetched</button>
+    <ul class="phases" id="phases" aria-label="Progress"></ul>
+    <div class="bar" aria-hidden="true"><div id="barFill" class="fill"></div></div>
+    <button id="stopBtn" class="stop" type="button">Stop and keep what's fetched</button>
   </div>
 
-  <section id="results" class="card">
-    <div class="toolbar">
-      <div class="left">
-        <span class="count" id="count"></span>
-        <input id="filter" type="text" placeholder="Filter by title, vendor, type…" style="width:260px" aria-label="Filter products">
-      </div>
-      <div class="left">
-        <button id="expFull" type="button" class="primary" title="Every detail, one row per variant">Full details CSV</button>
-        <button id="expShopify" type="button">Shopify CSV</button>
-        <button id="expWoo" type="button">WooCommerce CSV</button>
-        <button id="expJson" type="button">JSON</button>
-      </div>
+  <section class="inventory" id="inventory" aria-label="What you get">
+    <div><h2>Every variant</h2><p>Options, SKU, price, compare-at price, availability and the image for each variant.</p></div>
+    <div><h2>Every image</h2><p>All product images in order, with alt text.</p></div>
+    <div><h2>Four exports</h2><p>Full details, Shopify CSV, WooCommerce CSV and JSON, ready to import elsewhere.</p></div>
+    <div><h2>Your pick of products</h2><p>Preview the list, filter it, untick what you don't need, then export.</p></div>
+  </section>
+
+  <section id="results" aria-label="Results">
+    <div class="results-head">
+      <h2><span id="resultsTitle">Products</span> <span class="chip" id="platformChip" hidden></span></h2>
+      <input id="filter" class="filter" type="text" placeholder="Filter by title, vendor, type…" aria-label="Filter products">
     </div>
     <div class="table-wrap">
       <table>
         <thead>
           <tr>
             <th style="width:36px"><input type="checkbox" id="selectAll" aria-label="Select all shown products"></th>
-            <th style="width:64px"></th>
+            <th style="width:64px"><span class="sr-only" style="position:absolute;left:-9999px">Image</span></th>
             <th>Product</th>
             <th>Vendor</th>
             <th>Type</th>
-            <th>Collections / categories</th>
+            <th>Collections and categories</th>
             <th>Price</th>
             <th>Variants</th>
             <th>Stock</th>
@@ -162,6 +258,15 @@
       </table>
     </div>
     <div class="note" id="capNote" hidden></div>
+    <div class="dock">
+      <span class="sel" id="count"></span>
+      <div class="formats">
+        <button id="expFull" type="button" class="primary" title="Every detail, one row per variant">Full details CSV</button>
+        <button id="expShopify" type="button">Shopify CSV</button>
+        <button id="expWoo" type="button">WooCommerce CSV</button>
+        <button id="expJson" type="button">JSON</button>
+      </div>
+    </div>
   </section>
 </main>
 
@@ -305,7 +410,7 @@
   }
 
   function updateCount() {
-    $("count").textContent = state.selected.size + " of " + state.products.length + " products selected";
+    $("count").textContent = state.selected.size + " of " + state.products.length + " selected for export";
     var none = state.selected.size === 0;
     ["expFull", "expShopify", "expWoo", "expJson"].forEach(function (id) { $(id).disabled = none; });
   }
@@ -352,7 +457,15 @@
     state.selected = new Set(d.products.map(function (p) { return p.id; }));
     $("filter").value = "";
     $("results").style.display = "block";
+    $("inventory").hidden = true;
+    var chip = $("platformChip");
+    chip.hidden = !d.platform;
+    chip.className = "chip " + d.platform;
+    chip.textContent = d.platform === "woocommerce" ? "WooCommerce" : "Shopify";
+    $("resultsTitle").textContent = d.count + " products";
     applyFilter();
+    var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    $("results").scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
   }
 
   function renderProgress(job) {
@@ -370,6 +483,25 @@
       fill.style.width = pct + "%";
     }
     setStatus(job.message, false);
+    renderPhases(job);
+  }
+
+  var PHASE_LABELS = { products: "Products", collections: "Collections", variations: "Variations", details: "Deep details" };
+
+  function renderPhases(job) {
+    var order = ["products"];
+    if ($("optCollections").checked) order.push("collections");
+    if ($("optVariations").checked && job.platform === "woocommerce") order.push("variations");
+    if ($("optDeep").checked) order.push("details");
+    var at = order.indexOf(job.phase);
+    var list = $("phases");
+    list.textContent = "";
+    order.forEach(function (name, i) {
+      var cls = at === -1 ? "" : i < at ? "done" : i === at ? "current" : "";
+      var li = el("li", { class: cls, text: PHASE_LABELS[name] });
+      if (cls === "current") li.setAttribute("aria-current", "step");
+      list.appendChild(li);
+    });
   }
 
   function showWarnings(list) {
@@ -404,6 +536,7 @@
     ev.preventDefault();
     $("searchBtn").disabled = true;
     $("results").style.display = "none";
+    $("inventory").hidden = false;
     setStatus("Starting…", false);
     postJson("/api/search", {
       store: $("store").value,
