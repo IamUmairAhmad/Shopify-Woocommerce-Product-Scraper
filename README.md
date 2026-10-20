@@ -50,6 +50,11 @@ Writes `*-full-details.csv`, `*-shopify.csv`, `*-woocommerce.csv` and `*-product
 
 The raw JSON export contains everything above in its original structure, including the full JSON-LD.
 
+## Chrome extension
+
+The `chrome-extension/` folder is the same tool as a Chrome extension (load it unpacked at `chrome://extensions`); see
+`chrome-extension/README.md`.
+
 ## WooCommerce stores
 
 Read through WooCommerce's public **Store API** (`/wp-json/wc/store/v1/`, also `/?rest_route=` for plain permalinks).
@@ -68,6 +73,7 @@ Limits:
 ```bash
 python3 -I tests/test_app.py    # mock Shopify store, 10,500 products
 python3 -I tests/test_woo.py    # mock WooCommerce store (replicates documented API shapes)
+python3 -I tests/test_extension_parity.py   # Chrome extension output must match the Python tool (needs Node 20+)
 ```
 
 Neither suite touches a real store. Try a live check with `python cli.py <store> --deep`.

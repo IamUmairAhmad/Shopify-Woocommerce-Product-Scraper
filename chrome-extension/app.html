@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Store Product Exporter</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<main>
+  <p class="masthead"><span class="mark" aria-hidden="true"></span>Store Product Exporter</p>
+  <h1>Paste a store. Get the whole catalogue.</h1>
+  <p class="lede">Works on <strong>Shopify</strong> and <strong>WooCommerce</strong> stores. Titles, images, variations, prices, categories and more, exported as CSV or JSON. No limit on the number of products, and everything runs in your browser.</p>
+
+  <form id="form" autocomplete="off">
+    <div class="address">
+      <label for="store">Store</label>
+      <input id="store" type="text" placeholder="example-store.com" spellcheck="false" autocapitalize="off" required>
+      <button class="go" id="searchBtn" type="submit">Find products</button>
+    </div>
+
+    <div class="controls">
+      <div class="group">
+        <h2>What to fetch</h2>
+        <div class="selects">
+          <div class="field">
+            <label for="platform">Platform</label>
+            <select id="platform">
+              <option value="auto">Auto-detect</option>
+              <option value="shopify">Shopify</option>
+              <option value="woocommerce">WooCommerce</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="scope">Scope</label>
+            <select id="scope">
+              <option value="all">All products</option>
+              <option value="collection">One collection or category</option>
+              <option value="pages">A range of pages</option>
+            </select>
+          </div>
+          <div class="field" id="collectionField" hidden>
+            <label for="collection">Collection or category</label>
+            <select id="collection"><option value="">Load collections…</option></select>
+          </div>
+          <div class="field" id="pagesField" hidden>
+            <span id="pagesLabel">Pages (250 per page on Shopify, 100 on WooCommerce)</span>
+            <div class="pages" role="group" aria-labelledby="pagesLabel">
+              <input id="pageFrom" type="number" min="1" value="1" aria-label="From page">
+              <span>to</span>
+              <input id="pageTo" type="number" min="1" value="1" aria-label="To page">
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="group">
+        <h2>Extra detail</h2>
+        <div class="toggles">
+          <label class="toggle"><input type="checkbox" id="optCollections" checked>
+            <span><b>Collections and categories</b><small>Shopify: maps each product to its collections. WooCommerce: keeps the category tree with parents.</small></span></label>
+          <label class="toggle"><input type="checkbox" id="optVariations" checked>
+            <span><b>Variation prices and SKUs</b><small>WooCommerce only. One request per variable product; turn off for a faster scrape.</small></span></label>
+          <label class="toggle"><input type="checkbox" id="optDeep">
+            <span><b>Deep details</b><small>SEO title and description, structured data, barcodes, videos, and on WooCommerce weight and dimensions. Slower: one extra request per product.</small></span></label>
+        </div>
+      </div>
+    </div>
+    <p class="fineprint">Only public data is available. Stores don't expose inventory counts, so stock shows as in stock or out of stock. Requests go straight from this browser to the store; nothing is sent to any other server.</p>
+  </form>
+
+  <div id="status" role="status" aria-live="polite"></div>
+  <div id="progressRow" hidden>
+    <ul class="phases" id="phases" aria-label="Progress"></ul>
+    <div class="bar" aria-hidden="true"><div id="barFill" class="fill"></div></div>
+    <button id="stopBtn" class="stop" type="button">Stop and keep what's fetched</button>
+  </div>
+
+  <section class="inventory" id="inventory" aria-label="What you get">
+    <div><h2>Every variant</h2><p>Options, SKU, price, compare-at price, availability and the image for each variant.</p></div>
+    <div><h2>Every image</h2><p>All product images in order, with alt text.</p></div>
+    <div><h2>Four exports</h2><p>Full details, Shopify CSV, WooCommerce CSV and JSON, ready to import elsewhere.</p></div>
+    <div><h2>Your pick of products</h2><p>Preview the list, filter it, untick what you don't need, then export.</p></div>
+  </section>
+
+  <section id="results" aria-label="Results">
+    <div class="results-head">
+      <h2><span id="resultsTitle">Products</span> <span class="chip" id="platformChip" hidden></span></h2>
+      <input id="filter" class="filter" type="text" placeholder="Filter by title, vendor, type…" aria-label="Filter products">
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th style="width:36px"><input type="checkbox" id="selectAll" aria-label="Select all shown products"></th>
+            <th style="width:64px"><span class="sr-only" style="position:absolute;left:-9999px">Image</span></th>
+            <th>Product</th>
+            <th>Vendor</th>
+            <th>Type</th>
+            <th>Collections and categories</th>
+            <th>Price</th>
+            <th>Variants</th>
+            <th>Stock</th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+    <div class="note" id="capNote" hidden></div>
+    <div class="dock">
+      <span class="sel" id="count"></span>
+      <div class="formats">
+        <button id="expFull" type="button" class="primary" title="Every detail, one row per variant">Full details CSV</button>
+        <button id="expShopify" type="button">Shopify CSV</button>
+        <button id="expWoo" type="button">WooCommerce CSV</button>
+        <button id="expJson" type="button">JSON</button>
+      </div>
+    </div>
+  </section>
+</main>
+<script type="module" src="app.js"></script>
+</body>
+</html>
