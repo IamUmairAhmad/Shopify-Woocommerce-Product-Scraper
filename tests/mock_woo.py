@@ -10,6 +10,7 @@ Environment:
   MOCK_BULK_VARIATIONS  1 (default) | 0   -> type=variation&parent=... answers 400
   MOCK_MAX_PER_PAGE     100 (default)     -> server-side cap on per_page
   MOCK_SIMPLE           230               -> number of simple products
+  MOCK_REVIEWS          1 (default) | 0   -> /products/reviews answers 404 when 0
 """
 
 import html
@@ -26,6 +27,7 @@ MODE = os.environ.get("MOCK_MODE", "pretty")
 BULK = os.environ.get("MOCK_BULK_VARIATIONS", "1") == "1"
 MAX_PER_PAGE = int(os.environ.get("MOCK_MAX_PER_PAGE", "100"))
 N_SIMPLE = int(os.environ.get("MOCK_SIMPLE", "230"))
+REVIEWS_ON = os.environ.get("MOCK_REVIEWS", "1") == "1"
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 5056
 SITE = f"http://127.0.0.1:{PORT}"
 
@@ -156,6 +158,19 @@ for n in range(1, 3):
         product(3000 + n, f"Gift Set {n}", f"gift-set-{n}", ptype="grouped", price=0, grouped_products=[101, 102])
     )
 
+# Reviews: every 10th beanie has two, each hoodie has three.
+REVIEWS = []
+for p in PRODUCTS:
+    n = 3 if p["type"] == "variable" else (2 if p["type"] == "simple" and p["id"] % 10 == 0 else 0)
+    for k in range(n):
+        rid = len(REVIEWS) + 1
+        REVIEWS.append({
+            "id": rid, "date_created": f"2026-02-{k + 1:02d}T10:00:00", "formatted_date_created": "x",
+            "date_created_gmt": f"2026-02-{k + 1:02d}T05:00:00", "product_id": p["id"], "product_name": p["name"],
+            "product_permalink": p["permalink"], "product_image": None, "reviewer": f"Reviewer {rid}",
+            "review": f"<p>Great &amp; warm, review {rid}.</p>", "rating": 5 - (rid % 3), "verified": rid % 2 == 0,
+        })
+
 BY_SLUG = {p["slug"]: p for p in PRODUCTS}
 BY_ID = {p["id"]: p for p in PRODUCTS + VARIATIONS}
 
@@ -194,6 +209,11 @@ def list_products():
         parent = int(args.get("parent", 0))
         return paged([v for v in VARIATIONS if v["parent"] == parent])
     items = PRODUCTS
+    if args.get("slug"):
+        items = [p for p in items if p["slug"] == args["slug"]]
+    if args.get("search"):
+        q = args["search"].lower()
+        items = [p for p in items if q in html.unescape(p["name"]).lower() or q in p["sku"].lower()]
     if args.get("category"):
         cid = int(args["category"])
         ids = {cid} | {c["id"] for c in CATEGORIES if c["parent"] == cid}
@@ -207,6 +227,12 @@ def list_categories():
         count = sum(1 for p in PRODUCTS if any(x["id"] == c["id"] for x in p["categories"]))
         rows.append({"id": c["id"], "name": c["name"], "slug": c["slug"], "parent": c["parent"], "count": count})
     return paged(rows)
+
+
+def list_reviews():
+    if not REVIEWS_ON:
+        return jsonify({"code": "rest_no_route", "message": "No route was found.", "data": {"status": 404}}), 404
+    return paged(REVIEWS)
 
 
 def single(pid):
@@ -242,6 +268,13 @@ def r_categories():
     return gate() or list_categories()
 
 
+@app.get("/wp-json/wc/store/v1/products/reviews")
+def r_reviews():
+    if MODE == "plain":
+        abort(404)
+    return gate() or list_reviews()
+
+
 @app.get("/wp-json/wc/store/v1/products/<int:pid>")
 def r_single(pid):
     if MODE == "plain":
@@ -260,6 +293,8 @@ def home():
             return list_products()
         if route == "/wc/store/v1/products/categories":
             return list_categories()
+        if route == "/wc/store/v1/products/reviews":
+            return list_reviews()
         m = re.fullmatch(r"/wc/store/v1/products/(\d+)", route)
         if m:
             return single(int(m.group(1)))

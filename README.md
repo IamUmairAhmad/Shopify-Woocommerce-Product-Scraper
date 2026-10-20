@@ -1,7 +1,7 @@
 # Store Product Exporter
 
 Exports the public product catalog of a **Shopify or WooCommerce** store (auto-detected), with **no limit on the number of products**, as a
-full-details CSV, a Shopify-format CSV, a WooCommerce-format CSV, or complete JSON.
+full-details CSV, an Excel workbook, a Shopify-format CSV, a WooCommerce-format CSV, a reviews CSV, or complete JSON.
 
 ## Mac: double-click launcher (no typing)
 
@@ -34,7 +34,26 @@ python cli.py mystore.com/product-category/clothing/  # just one category
 python cli.py mystore.com --no-variations             # WooCommerce: skip per-variation prices (faster)
 ```
 
-Writes `*-full-details.csv`, `*-shopify.csv`, `*-woocommerce.csv` and `*-products.json` to the output folder.
+```bash
+python cli.py mystore.com --collections shoes,sale      # several collections / categories
+python cli.py mystore.com --search "running shoe"       # keyword search
+python cli.py mystore.com --products https://mystore.com/products/a b-handle   # specific products (links, slugs or handles)
+python cli.py mystore.com --reviews --link              # collect reviews; add a Product URL column to the Shopify / WooCommerce CSVs
+```
+
+Writes `*-full-details.csv`, `*-products.xlsx`, `*-shopify.csv`, `*-woocommerce.csv` and `*-products.json` to the output
+folder, plus `*-reviews.csv` when reviews were found.
+
+## Features
+
+- Export all products, with no limit, or only specific collections / categories, specific products (paste links or
+  handles) or a keyword search.
+- Export to Excel (.xlsx, with a Reviews sheet), full-details CSV, Shopify CSV, WooCommerce CSV, reviews CSV or JSON.
+- Optional **Product URL** column on the Shopify and WooCommerce CSVs.
+- Click a product title to see its details (description, options, variants, images, collections, SEO, reviews).
+- Product reviews: WooCommerce reads the store's public reviews feed. Shopify has no public reviews feed, so only
+  reviews the product page publishes as structured data are collected; apps such as Judge.me, Yotpo or Loox usually
+  load theirs separately and are not captured.
 
 ## What gets collected
 
@@ -73,10 +92,11 @@ Limits:
 ```bash
 python3 -I tests/test_app.py    # mock Shopify store, 10,500 products
 python3 -I tests/test_woo.py    # mock WooCommerce store (replicates documented API shapes)
+python3 -I tests/test_features.py   # collections, search, specific products, reviews, Excel, link column, details
 python3 -I tests/test_extension_parity.py   # Chrome extension output must match the Python tool (needs Node 20+)
 ```
 
-Neither suite touches a real store. Try a live check with `python cli.py <store> --deep`.
+None of the suites touch a real store. In particular, the WooCommerce `slug=` filter and `/products/reviews` route are written from the documented Store API and verified only against the mock. Try a live check with `python cli.py <store> --deep`.
 
 ## Notes
 

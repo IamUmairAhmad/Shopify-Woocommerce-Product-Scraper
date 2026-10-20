@@ -197,12 +197,13 @@ def _job_result(job, base, products, stopped_early, has_collections, has_details
     }
 
 
-def _run_job(job, base, collection, page_from, page_to, include_collections, deep, platform, variations):
+def _run_job(job, base, sel, include_collections, deep, reviews, platform, variations):
     products = []
     try:
         pipeline.run(
-            base, collection=collection, page_from=page_from, page_to=page_to,
-            include_collections=include_collections, deep=deep, platform=platform,
+            base, collections=sel["collections"], handles=sel["handles"], search=sel["search"],
+            page_from=sel["page_from"], page_to=sel["page_to"],
+            include_collections=include_collections, deep=deep, reviews=reviews, platform=platform,
             variations=variations, report=_JobReport(job), should_stop=job.stop.is_set,
             products=products,
         )
@@ -278,24 +279,38 @@ def api_search():
     platform = _platform_arg(body.get("platform"))
     scope = body.get("scope", "all")
 
-    collection = None
-    page_from, page_to = 1, None
-    if scope == "collection":
-        collection = (body.get("collection") or "").strip() or url_collection
-        if not collection:
-            raise ScrapeError("Choose a collection or category.")
+    sel = {"collections": [], "handles": [], "search": "", "page_from": 1, "page_to": None}
+    if scope in ("collection", "collections"):
+        picked = body.get("collections")
+        if not isinstance(picked, list):
+            picked = [body.get("collection")]
+        sel["collections"] = [str(c).strip() for c in picked if c and str(c).strip()][:200]
+        if not sel["collections"] and url_collection:
+            sel["collections"] = [url_collection]
+        if not sel["collections"]:
+            raise ScrapeError("Choose at least one collection or category.")
+    elif scope == "products":
+        sel["handles"] = scraper.parse_handles(str(body.get("products_text") or ""))[:2000]
+        if not sel["handles"]:
+            raise ScrapeError("Paste at least one product link or handle.")
+    elif scope == "search":
+        sel["search"] = str(body.get("query") or "").strip()[:200]
+        if not sel["search"]:
+            raise ScrapeError("Enter a keyword to search for.")
+        if url_collection:
+            sel["collections"] = [url_collection]
     elif scope == "pages":
         try:
-            page_from = int(body.get("page_from") or 1)
-            page_to = int(body.get("page_to") or page_from)
+            sel["page_from"] = int(body.get("page_from") or 1)
+            sel["page_to"] = int(body.get("page_to") or sel["page_from"])
         except (TypeError, ValueError):
             raise ScrapeError("Page numbers must be whole numbers.")
-        if page_from < 1 or page_to < page_from:
+        if sel["page_from"] < 1 or sel["page_to"] < sel["page_from"]:
             raise ScrapeError("Enter a valid page range.")
     elif scope != "all":
         raise ScrapeError("Unknown scope.")
     elif url_collection:
-        collection = url_collection
+        sel["collections"] = [url_collection]
 
     _prune_jobs()
     with _jobs_lock:
@@ -308,9 +323,8 @@ def api_search():
     threading.Thread(
         target=_run_job,
         args=(
-            job, base, collection, page_from, page_to,
-            bool(body.get("include_collections", True)), bool(body.get("deep", False)),
-            platform, bool(body.get("variations", True)),
+            job, base, sel, bool(body.get("include_collections", True)), bool(body.get("deep", False)),
+            bool(body.get("reviews", False)), platform, bool(body.get("variations", True)),
         ),
         daemon=True,
     ).start()
@@ -351,13 +365,22 @@ def api_export():
 
     fmt = body.get("format")
     base = entry["store"]
+    link = bool(body.get("include_link", False))
     host = re.sub(r"[^A-Za-z0-9.-]+", "_", base.split("://", 1)[-1])
     if fmt == "shopify":
-        data, mime, name = exporters.to_shopify_csv(products), "text/csv", f"{host}-shopify.csv"
+        data, mime, name = exporters.to_shopify_csv(products, link, base), "text/csv", f"{host}-shopify.csv"
     elif fmt == "woocommerce":
-        data, mime, name = exporters.to_woocommerce_csv(products), "text/csv", f"{host}-woocommerce.csv"
+        data, mime, name = exporters.to_woocommerce_csv(products, link, base), "text/csv", f"{host}-woocommerce.csv"
     elif fmt == "full":
         data, mime, name = exporters.to_full_csv(products, base), "text/csv", f"{host}-full-details.csv"
+    elif fmt == "reviews":
+        if not any(p.get("_reviews") for p in products):
+            return _error("None of the selected products have reviews. Turn on \"Product reviews\" and search again.")
+        data, mime, name = exporters.to_reviews_csv(products, base), "text/csv", f"{host}-reviews.csv"
+    elif fmt == "xlsx":
+        data = exporters.to_xlsx(products, base)
+        mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        name = f"{host}-products.xlsx"
     elif fmt == "json":
         data = json.dumps([exporters.to_full_json_item(p) for p in products], indent=2)
         mime, name = "application/json", f"{host}-products.json"
@@ -369,6 +392,20 @@ def api_export():
         mimetype=mime,
         headers={"Content-Disposition": f'attachment; filename="{name}"'},
     )
+
+
+@app.post("/api/product")
+def api_product():
+    """Full details of one scraped product, for the details panel."""
+    body = request.get_json(silent=True) or {}
+    entry = _cache_get(body.get("token") or "")
+    if not entry:
+        return _error("Your results expired. Please search again.", 410)
+    pid = body.get("id")
+    for p in entry["products"]:
+        if p.get("id") == pid:
+            return jsonify(exporters.detail_view(p, entry["store"]))
+    return _error("That product was not found.", 404)
 
 
 if __name__ == "__main__":

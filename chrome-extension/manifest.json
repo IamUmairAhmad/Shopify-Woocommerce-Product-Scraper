@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Store Product Exporter",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Export every public product from a Shopify or WooCommerce store as Shopify CSV, WooCommerce CSV, full-details CSV or JSON.",
   "action": {
     "default_title": "Export this store's products",

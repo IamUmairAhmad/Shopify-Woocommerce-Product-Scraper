@@ -52,6 +52,23 @@ def both(store, extra=()):
     return py, js, r1, r2
 
 
+def same_xlsx(a, b):
+    """Zip bytes differ between writers, so compare what Excel would show: sheet names and cell values."""
+    import openpyxl
+    wa, wb = openpyxl.load_workbook(a), openpyxl.load_workbook(b)
+    if wa.sheetnames != wb.sheetnames:
+        return False, f"sheets {wa.sheetnames} vs {wb.sheetnames}"
+    for name in wa.sheetnames:
+        ra = [list(r) for r in wa[name].iter_rows(values_only=True)]
+        rb = [list(r) for r in wb[name].iter_rows(values_only=True)]
+        if ra != rb:
+            for i, (x, y) in enumerate(zip(ra, rb)):
+                if x != y:
+                    return False, f"{name} row {i + 1}\n  py: {x[:12]}\n  js: {y[:12]}"
+            return False, f"{name}: {len(ra)} vs {len(rb)} rows"
+    return True, ""
+
+
 def compare(label, store, extra=()):
     py, js, r1, r2 = both(store, extra)
     if r1.returncode or r2.returncode:
@@ -60,8 +77,15 @@ def compare(label, store, extra=()):
     names = sorted(os.listdir(py))
     check(label + ": same files written", names == sorted(os.listdir(js)), f"{names} vs {sorted(os.listdir(js))}")
     for n in names:
-        a = open(os.path.join(py, n), encoding="utf-8", newline="").read()
-        b = open(os.path.join(js, n), encoding="utf-8", newline="").read()
+        if n.endswith(".xlsx"):
+            a = b = ""
+        else:
+            a = open(os.path.join(py, n), encoding="utf-8", newline="").read()
+            b = open(os.path.join(js, n), encoding="utf-8", newline="").read()
+        if n.endswith(".xlsx"):
+            ok, detail = same_xlsx(os.path.join(py, n), os.path.join(js, n))
+            check(f"{label}: {n.split('-', 1)[1]} same cells", ok, detail)
+            continue
         if n.endswith(".json"):
             ok = json.loads(a) == json.loads(b)
         else:
@@ -93,6 +117,15 @@ def main():
         compare("woo plain permalinks", "http://127.0.0.1:5073")
         compare("woo category", "http://127.0.0.1:5072/product-category/clothing/hoodies/")
         compare("woo no variations", "http://127.0.0.1:5072", ["--no-variations"])
+        compare("shopify collections", "http://127.0.0.1:5071", ["--collections", "shoes,sale", "--link"])
+        compare("shopify search", "http://127.0.0.1:5071", ["--search", "runner 1"])
+        compare("shopify products", "http://127.0.0.1:5071",
+                ["--products", "http://127.0.0.1:5071/products/runner-3", "sock-2", "nope-x"])
+        compare("shopify reviews", "http://127.0.0.1:5071", ["--collections", "shoes", "--reviews", "--link"])
+        compare("woo reviews", "http://127.0.0.1:5072", ["--reviews", "--link"])
+        compare("woo collections", "http://127.0.0.1:5072", ["--collections", "hoodies,accessories"])
+        compare("woo search", "http://127.0.0.1:5072", ["--search", "hoodie"])
+        compare("woo products", "http://127.0.0.1:5072", ["--products", "hoodie-1", "hoodie-2"])
     finally:
         for p in procs:
             p.terminate()

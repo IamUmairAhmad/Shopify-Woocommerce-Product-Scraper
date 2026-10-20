@@ -118,6 +118,14 @@ def collections():
     )
 
 
+@app.get("/products/<handle>.json")
+def product_json(handle):
+    p = BY_HANDLE.get(handle)
+    if not p:
+        abort(404)
+    return jsonify({"product": p})
+
+
 @app.get("/products/<handle>.js")
 def product_js(handle):
     p = BY_HANDLE.get(handle)
@@ -154,6 +162,14 @@ def product_page(handle):
         "offers": [{"@type": "Offer", "price": p["variants"][0]["price"], "priceCurrency": "USD",
                     "sku": p["variants"][0]["sku"], "gtin13": "0123456789012"}],
     }
+    if p["id"] % 7 == 0:  # some products publish a few reviews as structured data
+        ld["review"] = [
+            {"@type": "Review", "author": {"@type": "Person", "name": "Sam"}, "datePublished": "2026-02-01",
+             "name": "Love them", "reviewBody": "Fits well &amp; looks great.",
+             "reviewRating": {"@type": "Rating", "ratingValue": "5"}},
+            {"@type": "Review", "author": "Alex", "datePublished": "2026-02-02",
+             "reviewBody": "Okay.", "reviewRating": {"@type": "Rating", "ratingValue": "3"}},
+        ]
     return (
         "<!doctype html><html><head>"
         f"<title>{p['title'].replace('<', '&lt;')} – Mock Store</title>"

@@ -146,6 +146,53 @@
   .dock button:disabled { opacity: .4; cursor: not-allowed; }
   .dock :focus-visible { outline-color: var(--bg); }
 
+  /* collections picker, specific products, keyword */
+  .wide { flex: 1 1 100%; }
+  .picker { border: 1.5px solid var(--line-strong); border-radius: 10px; background: var(--surface); padding: 10px 12px; margin: 0; min-width: 0; }
+  .picker legend { font-size: .875rem; color: var(--muted); font-weight: 550; padding: 0 6px; }
+  .picker .filter { width: 100%; height: 38px; margin-bottom: 8px; }
+  .picklist { max-height: 220px; overflow: auto; display: grid; gap: 2px; }
+  .picklist label { display: flex; gap: 10px; align-items: center; padding: 5px 4px; border-radius: 6px; cursor: pointer; font-weight: 550; color: var(--ink); font-size: .95rem; }
+  .picklist label:hover { background: var(--action-soft); }
+  .picklist input { width: 18px; height: 18px; accent-color: var(--action); flex: none; }
+  .picklist small { color: var(--muted); font-weight: 500; margin-left: auto; padding-left: 8px; white-space: nowrap; }
+  .picked { color: var(--muted); font-size: .85rem; margin: 8px 0 0; }
+  textarea.box { width: 100%; min-height: 96px; padding: 10px 14px; border: 1.5px solid var(--line-strong); border-radius: 10px;
+    background: var(--surface); color: var(--ink); font: inherit; resize: vertical; }
+  input.text { width: 100%; height: 44px; padding: 0 14px; border: 1.5px solid var(--line-strong); border-radius: 10px;
+    background: var(--surface); color: var(--ink); font: inherit; font-weight: 550; }
+
+  /* product details */
+  .linklike { background: none; border: 0; padding: 0; font: inherit; font-weight: 650; color: var(--ink); cursor: pointer; text-align: left; }
+  .linklike:hover { text-decoration: underline; text-underline-offset: 3px; }
+  .ext { display: block; font-size: .8rem; color: var(--muted); text-decoration: none; margin-top: 2px; }
+  .ext:hover { text-decoration: underline; }
+  dialog#detail { width: min(920px, 94vw); max-height: 90vh; padding: 0; border: 2px solid var(--ink); border-radius: 14px;
+    background: var(--surface); color: var(--ink); overflow: hidden; }
+  dialog#detail::backdrop { background: rgba(8, 16, 32, .55); }
+  .detail-head { display: flex; gap: 16px; align-items: flex-start; justify-content: space-between; padding: 18px 22px; border-bottom: 2px solid var(--ink); }
+  .detail-head h2 { margin: 0; font-size: 1.35rem; letter-spacing: -.02em; line-height: 1.25; }
+  .detail-head button { flex: none; height: 38px; padding: 0 14px; border-radius: 10px; border: 1.5px solid var(--ink); background: transparent; color: var(--ink); font: inherit; font-weight: 650; cursor: pointer; }
+  .detail-head button:hover { background: var(--ink); color: var(--bg); }
+  #detailBody { padding: 18px 22px 26px; overflow: auto; max-height: calc(90vh - 80px); display: grid; gap: 22px; }
+  .meta { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--muted); margin: 0; }
+  .meta b { color: var(--ink); font-weight: 650; }
+  .gallery { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; }
+  .gallery img { height: 120px; width: auto; border-radius: 8px; background: var(--line); flex: none; }
+  .detail-sec h3 { margin: 0 0 8px; font-size: 1rem; }
+  .detail-sec p { margin: 0; white-space: pre-line; max-width: 75ch; }
+  .vwrap { overflow-x: auto; border: 1.5px solid var(--line-strong); border-radius: 10px; }
+  .vtable { width: 100%; min-width: 520px; }
+  .meta a { color: var(--action); font-weight: 650; }
+  .pills { display: flex; flex-wrap: wrap; gap: 6px; }
+  .pill { font-size: .85rem; font-weight: 600; padding: 2px 10px; border-radius: 99px; border: 1.5px solid var(--line-strong); }
+  .review { border-left: 3px solid var(--line-strong); padding: 2px 0 2px 12px; margin-bottom: 12px; }
+  .review b { font-weight: 650; }
+  .review small { color: var(--muted); }
+  .dock .linkopt { flex-basis: 100%; display: flex; gap: 10px; align-items: center; font-size: .9rem; cursor: pointer; }
+  .dock .linkopt input { width: 18px; height: 18px; accent-color: var(--action); }
+  .sr-only { position: absolute; left: -9999px; }
+
   @media (max-width: 760px) {
     .controls { grid-template-columns: 1fr; }
     .address { flex-wrap: wrap; box-shadow: 4px 4px 0 var(--ink); }
@@ -186,13 +233,25 @@
             <label for="scope">Scope</label>
             <select id="scope">
               <option value="all">All products</option>
-              <option value="collection">One collection or category</option>
+              <option value="collections">Collections or categories</option>
+              <option value="products">Specific products</option>
+              <option value="search">Keyword search</option>
               <option value="pages">A range of pages</option>
             </select>
           </div>
-          <div class="field" id="collectionField" hidden>
-            <label for="collection">Collection or category</label>
-            <select id="collection"><option value="">Load collections…</option></select>
+          <fieldset class="picker wide" id="collectionField" hidden>
+            <legend>Collections or categories</legend>
+            <input id="collectionFilter" class="filter" type="text" placeholder="Filter the list…" aria-label="Filter collections">
+            <div class="picklist" id="collectionList"><span class="picked">Enter a store above to load its list.</span></div>
+            <p class="picked" id="collectionCount" aria-live="polite"></p>
+          </fieldset>
+          <div class="field wide" id="productsField" hidden>
+            <label for="productsText">Product links or handles, one per line</label>
+            <textarea id="productsText" class="box" placeholder="https://example-store.com/products/some-product&#10;another-product-handle" spellcheck="false"></textarea>
+          </div>
+          <div class="field wide" id="searchField" hidden>
+            <label for="query">Keywords (every word must match the title, vendor, type, tags or SKU)</label>
+            <input id="query" class="text" type="text" placeholder="running shoe" spellcheck="false">
           </div>
           <div class="field" id="pagesField" hidden>
             <span id="pagesLabel">Pages (250 per page on Shopify, 100 on WooCommerce)</span>
@@ -212,6 +271,8 @@
             <span><b>Collections and categories</b><small>Shopify: maps each product to its collections. WooCommerce: keeps the category tree with parents.</small></span></label>
           <label class="toggle"><input type="checkbox" id="optVariations" checked>
             <span><b>Variation prices and SKUs</b><small>WooCommerce only. One request per variable product; turn off for a faster scrape.</small></span></label>
+          <label class="toggle"><input type="checkbox" id="optReviews">
+            <span><b>Product reviews</b><small>WooCommerce: every public review. Shopify: reviews the product page publishes as structured data (apps like Judge.me or Yotpo usually don't). Adds a reviews export.</small></span></label>
           <label class="toggle"><input type="checkbox" id="optDeep">
             <span><b>Deep details</b><small>SEO title and description, structured data, barcodes, videos, and on WooCommerce weight and dimensions. Slower: one extra request per product.</small></span></label>
         </div>
@@ -262,13 +323,24 @@
       <span class="sel" id="count"></span>
       <div class="formats">
         <button id="expFull" type="button" class="primary" title="Every detail, one row per variant">Full details CSV</button>
+        <button id="expXlsx" type="button" title="Excel workbook with the full details (and reviews)">Excel</button>
         <button id="expShopify" type="button">Shopify CSV</button>
         <button id="expWoo" type="button">WooCommerce CSV</button>
+        <button id="expReviews" type="button">Reviews CSV</button>
         <button id="expJson" type="button">JSON</button>
       </div>
+      <label class="linkopt"><input type="checkbox" id="optLink"> Add a product link column to the Shopify and WooCommerce CSVs</label>
     </div>
   </section>
 </main>
+
+<dialog id="detail" aria-labelledby="detailTitle">
+  <div class="detail-head">
+    <h2 id="detailTitle"></h2>
+    <button id="detailClose" type="button">Close</button>
+  </div>
+  <div id="detailBody"></div>
+</dialog>
 
 <script>
 (function () {
@@ -316,35 +388,66 @@
 
   function updateScopeUi() {
     var scope = $("scope").value;
-    $("collectionField").hidden = scope !== "collection";
+    $("collectionField").hidden = scope !== "collections";
+    $("productsField").hidden = scope !== "products";
+    $("searchField").hidden = scope !== "search";
     $("pagesField").hidden = scope !== "pages";
-    if (scope === "collection") loadCollections();
+    if (scope === "collections") loadCollections();
+  }
+
+  var picked = new Set();
+
+  function updatePicked() {
+    $("collectionCount").textContent = picked.size ? picked.size + " selected" : "";
+  }
+
+  function renderCollectionList(items) {
+    var box = $("collectionList");
+    box.textContent = "";
+    if (!items.length) {
+      box.appendChild(el("span", { class: "picked", text: "No collections found." }));
+      return;
+    }
+    items.forEach(function (c) {
+      var cb = el("input", { type: "checkbox", value: c.handle });
+      cb.checked = picked.has(c.handle);
+      cb.addEventListener("change", function () {
+        if (cb.checked) picked.add(c.handle); else picked.delete(c.handle);
+        updatePicked();
+      });
+      var label = el("label", {}, [cb, el("span", { text: c.title })]);
+      if (c.products_count != null) label.appendChild(el("small", { text: String(c.products_count) }));
+      label.dataset.search = c.title.toLowerCase();
+      box.appendChild(label);
+    });
+  }
+
+  function filterCollections() {
+    var q = $("collectionFilter").value.trim().toLowerCase();
+    Array.prototype.forEach.call($("collectionList").children, function (node) {
+      if (node.dataset && node.dataset.search !== undefined) node.hidden = q && node.dataset.search.indexOf(q) === -1;
+    });
   }
 
   function loadCollections() {
     var store = $("store").value.trim();
     var key = store + "|" + $("platform").value;
     if (!store || collectionsFor === key) return;
-    var sel = $("collection");
-    sel.textContent = "";
-    sel.appendChild(el("option", { value: "", text: "Loading…" }));
+    var box = $("collectionList");
+    box.textContent = "";
+    box.appendChild(el("span", { class: "picked", text: "Loading…" }));
+    picked = new Set();
+    updatePicked();
     api("/api/collections?store=" + encodeURIComponent(store) + "&platform=" + encodeURIComponent($("platform").value))
       .then(function (r) { return r.json(); })
       .then(function (d) {
         collectionsFor = key;
-        sel.textContent = "";
-        if (!d.collections.length) {
-          sel.appendChild(el("option", { value: "", text: "No collections found" }));
-          return;
-        }
-        d.collections.forEach(function (c) {
-          var label = c.title + (c.products_count != null ? " (" + c.products_count + ")" : "");
-          sel.appendChild(el("option", { value: c.handle, text: label }));
-        });
+        renderCollectionList(d.collections);
+        filterCollections();
       })
       .catch(function (e) {
-        sel.textContent = "";
-        sel.appendChild(el("option", { value: "", text: "Couldn't load collections" }));
+        box.textContent = "";
+        box.appendChild(el("span", { class: "picked", text: "Couldn't load the list." }));
         setStatus(e.message, true);
       });
   }
@@ -381,8 +484,10 @@
         ? el("img", { class: "thumb", src: p.image, alt: "", loading: "lazy", referrerpolicy: "no-referrer" })
         : el("div", { class: "thumb" });
       var titleCell = el("td", { class: "title" });
-      if (p.url) titleCell.appendChild(el("a", { href: p.url, target: "_blank", rel: "noopener noreferrer", text: p.title }));
-      else titleCell.textContent = p.title;
+      var open = el("button", { type: "button", class: "linklike", text: p.title || "(untitled)" });
+      open.addEventListener("click", function () { showDetails(p); });
+      titleCell.appendChild(open);
+      if (p.url) titleCell.appendChild(el("a", { class: "ext", href: p.url, target: "_blank", rel: "noopener noreferrer", text: "Open on the store" }));
       var stock = el("span", { class: "badge" + (p.available ? " ok" : ""), text: p.available ? "In stock" : "Out of stock" });
       body.appendChild(el("tr", {}, [
         el("td", {}, [cb]),
@@ -412,7 +517,7 @@
   function updateCount() {
     $("count").textContent = state.selected.size + " of " + state.products.length + " selected for export";
     var none = state.selected.size === 0;
-    ["expFull", "expShopify", "expWoo", "expJson"].forEach(function (id) { $(id).disabled = none; });
+    ["expFull", "expXlsx", "expShopify", "expWoo", "expReviews", "expJson"].forEach(function (id) { $(id).disabled = none; });
   }
 
   function doExport(format, button) {
@@ -420,11 +525,11 @@
     var ids = state.selected.size === state.products.length ? null : Array.from(state.selected);
     button.disabled = true;
     setStatus("Preparing export…", false);
-    postJson("/api/export", { token: state.token, ids: ids, format: format })
+    postJson("/api/export", { token: state.token, ids: ids, format: format, include_link: $("optLink").checked })
       .then(function (res) {
         var disposition = res.headers.get("content-disposition") || "";
         var m = /filename="([^"]+)"/.exec(disposition);
-        var name = m ? m[1] : "products." + (format === "json" ? "json" : "csv");
+        var name = m ? m[1] : "products." + (format === "json" ? "json" : format === "xlsx" ? "xlsx" : "csv");
         return res.blob().then(function (blob) { return { blob: blob, name: name }; });
       })
       .then(function (f) {
@@ -439,6 +544,94 @@
       .catch(function (e) { setStatus(e.message, true); })
       .then(function () { updateCount(); });
   }
+
+  function section(title, node) {
+    return el("section", { class: "detail-sec" }, [el("h3", { text: title }), node]);
+  }
+
+  function pills(list) {
+    return el("div", { class: "pills" }, list.map(function (t) { return el("span", { class: "pill", text: t }); }));
+  }
+
+  function renderDetails(d, product) {
+    var body = $("detailBody");
+    body.textContent = "";
+    var meta = el("p", { class: "meta" });
+    [["Platform", d.platform], ["Vendor", d.vendor], ["Type", d.product_type]].forEach(function (kv) {
+      if (kv[1]) { meta.appendChild(el("span", {}, [document.createTextNode(kv[0] + " "), el("b", { text: kv[1] })])); }
+    });
+    if (d.rating) meta.appendChild(el("span", {}, [document.createTextNode("Rating "), el("b", { text: d.rating + (d.review_count ? " (" + d.review_count + ")" : "") })]));
+    if (d.url) meta.appendChild(el("a", { href: d.url, target: "_blank", rel: "noopener noreferrer", text: "Open on the store" }));
+    body.appendChild(meta);
+
+    if (d.images.length) {
+      var g = el("div", { class: "gallery" });
+      d.images.slice(0, 30).forEach(function (im) {
+        g.appendChild(el("img", { src: im.src, alt: im.alt, loading: "lazy", referrerpolicy: "no-referrer" }));
+      });
+      body.appendChild(g);
+    }
+    if (d.short_description) body.appendChild(section("Short description", el("p", { text: d.short_description })));
+    if (d.description) body.appendChild(section("Description", el("p", { text: d.description })));
+
+    var opts = d.options.filter(function (o) { return !(o.name === "Title" && o.values.join() === "Default Title"); });
+    if (opts.length) {
+      var wrap = el("div", {});
+      opts.forEach(function (o) { wrap.appendChild(el("p", { text: o.name + ": " + o.values.join(", ") })); });
+      body.appendChild(section("Options", wrap));
+    }
+    var others = d.attributes.filter(function (a) { return !opts.some(function (o) { return o.name === a.name; }); });
+    if (others.length) {
+      var aw = el("div", {});
+      others.forEach(function (a) { aw.appendChild(el("p", { text: a.name + ": " + a.terms.join(", ") })); });
+      body.appendChild(section("Attributes", aw));
+    }
+
+    var rows = d.variants.map(function (v) {
+      return el("tr", {}, [
+        el("td", { text: v.title }), el("td", { text: v.sku }),
+        el("td", { class: "num", text: v.price + (v.compare_at_price ? " (was " + v.compare_at_price + ")" : "") }),
+        el("td", { text: v.available ? "In stock" : "Out of stock" }),
+        el("td", { text: v.barcode || "" })
+      ]);
+    });
+    var table = el("table", { class: "vtable" }, [
+      el("thead", {}, [el("tr", {}, ["Variant", "SKU", "Price", "Stock", "Barcode"].map(function (h) { return el("th", { text: h }); }))]),
+      el("tbody", {}, rows)
+    ]);
+    body.appendChild(section("Variants (" + d.variants.length + ")", el("div", { class: "vwrap" }, [table])));
+
+    if (d.collections.length) body.appendChild(section("Collections and categories", pills(d.collections)));
+    if (d.tags.length) body.appendChild(section("Tags", pills(d.tags)));
+    if (d.seo_title || d.seo_description) {
+      body.appendChild(section("SEO", el("p", { text: [d.seo_title, d.seo_description].filter(Boolean).join("\n") })));
+    }
+    if (d.reviews.length) {
+      var rw = el("div", {});
+      d.reviews.forEach(function (r) {
+        var head = [r.reviewer || "Anonymous", r.rating ? r.rating + "/5" : "", r.date ? r.date.slice(0, 10) : ""].filter(Boolean).join(" · ");
+        rw.appendChild(el("div", { class: "review" }, [
+          el("b", { text: r.title || head }), r.title ? el("small", { text: "  " + head }) : document.createTextNode(""),
+          el("p", { text: r.body })
+        ]));
+      });
+      var more = d.review_total > d.reviews.length ? " (showing " + d.reviews.length + " of " + d.review_total + ")" : "";
+      body.appendChild(section("Reviews (" + d.review_total + ")" + more, rw));
+    }
+  }
+
+  function showDetails(p) {
+    var dlg = $("detail");
+    $("detailTitle").textContent = p.title || "Product";
+    $("detailBody").textContent = "Loading…";
+    if (!dlg.open) dlg.showModal();
+    postJson("/api/product", { token: state.token, id: p.id })
+      .then(function (r) { return r.json(); })
+      .then(function (d) { $("detailTitle").textContent = d.title || p.title; renderDetails(d); })
+      .catch(function (e) { $("detailBody").textContent = e.message; });
+  }
+  $("detailClose").addEventListener("click", function () { $("detail").close(); });
+  $("detail").addEventListener("click", function (ev) { if (ev.target === this) this.close(); });
 
   var pollTimer = null;
   var currentJob = null;
@@ -474,6 +667,8 @@
     var pct = null;
     if (job.phase === "collections" && p.collections_total) pct = 100 * p.collections_done / p.collections_total;
     if (job.phase === "variations" && p.variations_total) pct = 100 * p.variations_done / p.variations_total;
+    if (job.phase === "reviews" && p.reviews_total) pct = 100 * p.reviews_done / p.reviews_total;
+    if (job.phase === "reviews" && p.details_total) pct = 100 * p.details_done / p.details_total;
     if (job.phase === "details" && p.details_total) pct = 100 * p.details_done / p.details_total;
     if (pct === null) {
       fill.className = "fill indeterminate";
@@ -486,12 +681,13 @@
     renderPhases(job);
   }
 
-  var PHASE_LABELS = { products: "Products", collections: "Collections", variations: "Variations", details: "Deep details" };
+  var PHASE_LABELS = { products: "Products", collections: "Collections", variations: "Variations", reviews: "Reviews", details: "Deep details" };
 
   function renderPhases(job) {
     var order = ["products"];
     if ($("optCollections").checked) order.push("collections");
     if ($("optVariations").checked && job.platform === "woocommerce") order.push("variations");
+    if ($("optReviews").checked) order.push("reviews");
     if ($("optDeep").checked) order.push("details");
     var at = order.indexOf(job.phase);
     var list = $("phases");
@@ -541,7 +737,10 @@
     postJson("/api/search", {
       store: $("store").value,
       scope: $("scope").value,
-      collection: $("collection").value,
+      collections: Array.from(picked),
+      products_text: $("productsText").value,
+      query: $("query").value,
+      reviews: $("optReviews").checked,
       page_from: $("pageFrom").value,
       page_to: $("pageTo").value,
       platform: $("platform").value,
@@ -567,13 +766,14 @@
   });
 
   $("scope").addEventListener("change", updateScopeUi);
+  $("collectionFilter").addEventListener("input", filterCollections);
   $("store").addEventListener("input", function () { collectionsFor = null; });
   $("platform").addEventListener("change", function () {
     collectionsFor = null;
-    if ($("scope").value === "collection") loadCollections();
+    if ($("scope").value === "collections") loadCollections();
   });
   $("store").addEventListener("change", function () {
-    if ($("scope").value === "collection") loadCollections();
+    if ($("scope").value === "collections") loadCollections();
   });
   $("filter").addEventListener("input", applyFilter);
   $("selectAll").addEventListener("change", function () {
@@ -584,6 +784,8 @@
     render();
   });
   $("expFull").addEventListener("click", function () { doExport("full", this); });
+  $("expXlsx").addEventListener("click", function () { doExport("xlsx", this); });
+  $("expReviews").addEventListener("click", function () { doExport("reviews", this); });
   $("expShopify").addEventListener("click", function () { doExport("shopify", this); });
   $("expWoo").addEventListener("click", function () { doExport("woocommerce", this); });
   $("expJson").addEventListener("click", function () { doExport("json", this); });

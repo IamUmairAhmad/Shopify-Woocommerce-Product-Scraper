@@ -4,6 +4,10 @@
     python cli.py noelmartz.com --deep           # also SEO, structured data, barcodes, videos, weight
     python cli.py mystore.com --platform woocommerce --out exports
     python cli.py mystore.com/product-category/clothing/   # just that category
+    python cli.py mystore.com --collections shoes,sale     # several collections / categories
+    python cli.py mystore.com --search "running shoe"      # keyword search
+    python cli.py mystore.com --products url1 url2         # specific products (links or handles)
+    python cli.py mystore.com --reviews --link             # product reviews, product link column
 
 There is no limit on the number of products.
 """
@@ -54,6 +58,11 @@ def main():
     ap.add_argument("--no-collections", action="store_true", help="skip collections / the category tree")
     ap.add_argument("--no-variations", action="store_true",
                     help="WooCommerce: skip per-variation prices and SKUs (faster)")
+    ap.add_argument("--collections", default="", help="comma separated collection handles / category slugs")
+    ap.add_argument("--search", default="", help="only products matching these keywords")
+    ap.add_argument("--products", nargs="+", default=[], help="specific product links or handles")
+    ap.add_argument("--reviews", action="store_true", help="also collect product reviews (writes a reviews file)")
+    ap.add_argument("--link", action="store_true", help="add a Product URL column to the Shopify and WooCommerce CSVs")
     ap.add_argument("--out", default="export", help="output folder (default: export)")
     args = ap.parse_args()
 
@@ -62,8 +71,10 @@ def main():
         base, collection = scraper.parse_store_input(args.store)
         print(f"Store: {base}" + (f"  (collection/category: {collection})" if collection else ""))
         report = PrintReport()
+        picked = [c.strip() for c in args.collections.split(",") if c.strip()] or ([collection] if collection else [])
         pipeline.run(
-            base, collection=collection, include_collections=not args.no_collections, deep=args.deep,
+            base, collections=picked, handles=scraper.parse_handles(" ".join(args.products)), search=args.search,
+            include_collections=not args.no_collections, deep=args.deep, reviews=args.reviews,
             platform=args.platform, variations=not args.no_variations, report=report, products=products,
         )
         report.phase("done")
@@ -84,14 +95,20 @@ def main():
     host = re.sub(r"[^A-Za-z0-9.-]+", "_", base.split("://", 1)[-1])
     files = {
         f"{host}-full-details.csv": exporters.to_full_csv(products, base),
-        f"{host}-shopify.csv": exporters.to_shopify_csv(products),
-        f"{host}-woocommerce.csv": exporters.to_woocommerce_csv(products),
+        f"{host}-shopify.csv": exporters.to_shopify_csv(products, args.link, base),
+        f"{host}-woocommerce.csv": exporters.to_woocommerce_csv(products, args.link, base),
         f"{host}-products.json": json.dumps([exporters.to_full_json_item(p) for p in products], indent=2),
     }
+    if any(p.get("_reviews") for p in products):
+        files[f"{host}-reviews.csv"] = exporters.to_reviews_csv(products, base)
     for name, data in files.items():
         with open(os.path.join(args.out, name), "w", encoding="utf-8", newline="") as f:
             f.write(data)
         print("wrote", os.path.join(args.out, name))
+    xlsx_name = os.path.join(args.out, f"{host}-products.xlsx")
+    with open(xlsx_name, "wb") as f:
+        f.write(exporters.to_xlsx(products, base))
+    print("wrote", xlsx_name)
     variants = sum(len(p.get("variants") or []) for p in products)
     print(f"Done: {len(products)} products, {variants} variants.")
 

@@ -11,6 +11,8 @@ import io
 import re
 from decimal import Decimal, InvalidOperation
 
+import xlsx
+
 SHOPIFY_HEADERS = [
     "Handle", "Title", "Body (HTML)", "Vendor", "Product Category", "Type", "Tags",
     "Published", "Option1 Name", "Option1 Value", "Option2 Name", "Option2 Value",
@@ -29,6 +31,13 @@ SHOPIFY_HEADERS = [
     "Google Shopping / Custom Label 2", "Google Shopping / Custom Label 3",
     "Google Shopping / Custom Label 4",
     "Variant Image", "Variant Weight Unit", "Variant Tax Code", "Cost per item", "Status",
+]
+
+LINK_HEADER = "Product URL"
+
+REVIEW_HEADERS = [
+    "Product ID", "Product Handle", "Product Title", "Product URL", "Review ID", "Reviewer", "Rating",
+    "Date", "Title", "Review", "Verified", "Source",
 ]
 
 WOO_ATTRIBUTES = 3
@@ -201,8 +210,15 @@ def _unique(seq):
 # --------------------------------------------------------------------------- Shopify
 
 
-def to_shopify_csv(products):
-    """Shopify's product import format: one row per variant, extra rows for more images."""
+def _product_url(p, base_url=""):
+    return p.get("_url") or (f"{base_url}/products/{p['handle']}" if p.get("handle") and base_url else "")
+
+
+def to_shopify_csv(products, include_link=False, base_url=""):
+    """Shopify's product import format: one row per variant, extra rows for more images.
+
+    `include_link` adds a trailing "Product URL" column on each product's first row.
+    """
     rows = []
     for p in products:
         handle = p.get("handle") or str(p.get("id"))
@@ -228,6 +244,8 @@ def to_shopify_csv(products):
                         "Status": "active",
                     }
                 )
+                if include_link:
+                    row[LINK_HEADER] = _product_url(p, base_url)
             if i < len(variants):
                 v = variants[i]
                 for idx in range(3):
@@ -255,7 +273,7 @@ def to_shopify_csv(products):
                 row["Image Position"] = i + 1
                 row["Image Alt Text"] = images[i].get("alt") or ""
             rows.append(row)
-    return _write(SHOPIFY_HEADERS, rows)
+    return _write(SHOPIFY_HEADERS + ([LINK_HEADER] if include_link else []), rows)
 
 
 # --------------------------------------------------------------------------- WooCommerce
@@ -387,7 +405,7 @@ def _woo_source_rows(p, sku_by_id):
     return [parent]
 
 
-def to_woocommerce_csv(products):
+def to_woocommerce_csv(products, include_link=False, base_url=""):
     """WooCommerce product import format with simple and variable products.
 
     Categories combine the product type with every collection the product belongs to.
@@ -404,93 +422,101 @@ def to_woocommerce_csv(products):
             n_attr = max(n_attr, len(info.get("attributes") or []))
             sku_by_id[p.get("id")] = info.get("sku") or ""
     for p in products:
-        if p.get("_woo"):
-            rows.extend(_woo_source_rows(p, sku_by_id))
-            continue
-        variants = p.get("variants") or []
-        image_urls =", ".join(i["src"] for i in _images(p))
-        categories = ", ".join(_unique([p.get("product_type") or ""] + _collections(p)))
-        base = _woo_row_base()
-        any_available = any(v.get("available", True) for v in variants) if variants else True
+        start = len(rows)
+        _append_woo_rows(rows, p, sku_by_id)
+        if include_link and len(rows) > start:
+            rows[start][LINK_HEADER] = _product_url(p, base_url)
+    return _write(woo_headers(n_attr) + ([LINK_HEADER] if include_link else []), rows)
 
-        if not variants or (len(variants) == 1 and _is_default_only(p)):
-            v = variants[0] if variants else {}
-            sale, regular = _woo_price(v)
-            grams = v.get("grams")
-            row = dict(base)
-            row.update(
-                {
-                    "Type": "simple",
-                    "SKU": v.get("sku") or "",
-                    "Name": p.get("title", ""),
-                    "Description": p.get("body_html") or "",
-                    "In stock?": 1 if v.get("available", True) else 0,
-                    "Weight (kg)": round(grams / 1000, 3) if grams else "",
-                    "Sale price": sale,
-                    "Regular price": regular,
-                    "Categories": categories,
-                    "Tags": ", ".join(_tags(p)),
-                    "Images": image_urls,
-                }
-            )
-            rows.append(row)
-            continue
 
-        opts = _options(p)
-        parent_sku = p.get("handle") or f"product-{p.get('id')}"
-        parent = dict(base)
-        parent.update(
+def _append_woo_rows(rows, p, sku_by_id):
+    """Append the WooCommerce import rows for one product."""
+    if p.get("_woo"):
+        rows.extend(_woo_source_rows(p, sku_by_id))
+        return
+    variants = p.get("variants") or []
+    image_urls =", ".join(i["src"] for i in _images(p))
+    categories = ", ".join(_unique([p.get("product_type") or ""] + _collections(p)))
+    base = _woo_row_base()
+    any_available = any(v.get("available", True) for v in variants) if variants else True
+
+    if not variants or (len(variants) == 1 and _is_default_only(p)):
+        v = variants[0] if variants else {}
+        sale, regular = _woo_price(v)
+        grams = v.get("grams")
+        row = dict(base)
+        row.update(
             {
-                "Type": "variable",
-                "SKU": parent_sku,
+                "Type": "simple",
+                "SKU": v.get("sku") or "",
                 "Name": p.get("title", ""),
                 "Description": p.get("body_html") or "",
-                "In stock?": 1 if any_available else 0,
+                "In stock?": 1 if v.get("available", True) else 0,
+                "Weight (kg)": round(grams / 1000, 3) if grams else "",
+                "Sale price": sale,
+                "Regular price": regular,
                 "Categories": categories,
                 "Tags": ", ".join(_tags(p)),
                 "Images": image_urls,
             }
         )
-        for idx, opt in enumerate(opts, start=1):
-            values = opt.get("values") or []
-            parent[f"Attribute {idx} name"] = opt.get("name", "")
-            parent[f"Attribute {idx} value(s)"] = ", ".join(values)
-            parent[f"Attribute {idx} visible"] = 1
-            parent[f"Attribute {idx} global"] = 0
-            parent[f"Attribute {idx} default"] = values[0] if values else ""
-        rows.append(parent)
+        rows.append(row)
+        return
 
-        used_skus = {parent_sku}
-        for pos, v in enumerate(variants):
-            sale, regular = _woo_price(v)
-            grams = v.get("grams")
-            sku = v.get("sku") or ""
-            if sku in used_skus:  # WooCommerce SKUs must be unique
-                sku = ""
-            if sku:
-                used_skus.add(sku)
-            row = dict(base)
-            row.update(
-                {
-                    "Type": "variation",
-                    "SKU": sku,
-                    "Name": f"{p.get('title', '')} - {v.get('title', '')}",
-                    "In stock?": 1 if v.get("available", True) else 0,
-                    "Weight (kg)": round(grams / 1000, 3) if grams else "",
-                    "Sale price": sale,
-                    "Regular price": regular,
-                    "Images": _variant_image(p, v),
-                    "Parent": parent_sku,
-                    "Position": pos,
-                }
-            )
-            for idx, opt in enumerate(opts, start=1):
-                row[f"Attribute {idx} name"] = opt.get("name", "")
-                row[f"Attribute {idx} value(s)"] = v.get(f"option{idx}") or ""
-                row[f"Attribute {idx} visible"] = 1
-                row[f"Attribute {idx} global"] = 0
-            rows.append(row)
-    return _write(woo_headers(n_attr), rows)
+    opts = _options(p)
+    parent_sku = p.get("handle") or f"product-{p.get('id')}"
+    parent = dict(base)
+    parent.update(
+        {
+            "Type": "variable",
+            "SKU": parent_sku,
+            "Name": p.get("title", ""),
+            "Description": p.get("body_html") or "",
+            "In stock?": 1 if any_available else 0,
+            "Categories": categories,
+            "Tags": ", ".join(_tags(p)),
+            "Images": image_urls,
+        }
+    )
+    for idx, opt in enumerate(opts, start=1):
+        values = opt.get("values") or []
+        parent[f"Attribute {idx} name"] = opt.get("name", "")
+        parent[f"Attribute {idx} value(s)"] = ", ".join(values)
+        parent[f"Attribute {idx} visible"] = 1
+        parent[f"Attribute {idx} global"] = 0
+        parent[f"Attribute {idx} default"] = values[0] if values else ""
+    rows.append(parent)
+
+    used_skus = {parent_sku}
+    for pos, v in enumerate(variants):
+        sale, regular = _woo_price(v)
+        grams = v.get("grams")
+        sku = v.get("sku") or ""
+        if sku in used_skus:  # WooCommerce SKUs must be unique
+            sku = ""
+        if sku:
+            used_skus.add(sku)
+        row = dict(base)
+        row.update(
+            {
+                "Type": "variation",
+                "SKU": sku,
+                "Name": f"{p.get('title', '')} - {v.get('title', '')}",
+                "In stock?": 1 if v.get("available", True) else 0,
+                "Weight (kg)": round(grams / 1000, 3) if grams else "",
+                "Sale price": sale,
+                "Regular price": regular,
+                "Images": _variant_image(p, v),
+                "Parent": parent_sku,
+                "Position": pos,
+            }
+        )
+        for idx, opt in enumerate(opts, start=1):
+            row[f"Attribute {idx} name"] = opt.get("name", "")
+            row[f"Attribute {idx} value(s)"] = v.get(f"option{idx}") or ""
+            row[f"Attribute {idx} visible"] = 1
+            row[f"Attribute {idx} global"] = 0
+        rows.append(row)
 
 
 # --------------------------------------------------------------------------- full details
@@ -498,6 +524,11 @@ def to_woocommerce_csv(products):
 
 def to_full_csv(products, base_url=""):
     """One row per variant with every product-level and variant-level detail available."""
+    return _write(FULL_HEADERS, full_rows(products, base_url))
+
+
+def full_rows(products, base_url=""):
+    """The rows behind the full-details CSV and the Excel workbook's Products sheet."""
     rows = []
     for p in products:
         d = _details(p)
@@ -591,7 +622,102 @@ def to_full_csv(products, base_url=""):
                 }
             )
             rows.append(row)
-    return _write(FULL_HEADERS, rows)
+    return rows
+
+
+# --------------------------------------------------------------------------- reviews
+
+
+def review_rows(products, base_url=""):
+    """One row per review across all products."""
+    rows = []
+    for p in products:
+        for r in p.get("_reviews") or []:
+            rows.append(
+                {
+                    "Product ID": p.get("id", ""),
+                    "Product Handle": p.get("handle", ""),
+                    "Product Title": p.get("title", ""),
+                    "Product URL": _product_url(p, base_url),
+                    "Review ID": r.get("id") if r.get("id") is not None else "",
+                    "Reviewer": r.get("reviewer", ""),
+                    "Rating": r.get("rating", ""),
+                    "Date": r.get("date", ""),
+                    "Title": r.get("title", ""),
+                    "Review": r.get("body", ""),
+                    "Verified": r.get("verified", ""),
+                    "Source": r.get("source", ""),
+                }
+            )
+    return rows
+
+
+def to_reviews_csv(products, base_url=""):
+    return _write(REVIEW_HEADERS, review_rows(products, base_url))
+
+
+# --------------------------------------------------------------------------- Excel
+
+_NUMBER_COLUMNS = ["Price", "Compare At Price", "Product Min Price", "Product Max Price", "Variant Count",
+                   "Image Count", "Weight (grams)", "Weight (kg)", "Length (cm)", "Width (cm)", "Height (cm)",
+                   "Review Count", "Rating"]
+
+
+def to_xlsx(products, base_url=""):
+    """An Excel workbook: a Products sheet (same columns as the full-details CSV) plus Reviews when there are any."""
+    sheets = [("Products", FULL_HEADERS, full_rows(products, base_url), _NUMBER_COLUMNS)]
+    reviews = review_rows(products, base_url)
+    if reviews:
+        sheets.append(("Reviews", REVIEW_HEADERS, reviews, ["Rating"]))
+    return xlsx.write_xlsx(sheets)
+
+
+# --------------------------------------------------------------------------- product details view
+
+
+def detail_view(p, base_url=""):
+    """Everything worth showing about one product, as plain text and numbers (safe to render without HTML)."""
+    d = _details(p)
+    info = p.get("_woo") or {}
+    opts = _options(p)
+    variants = []
+    for v in p.get("variants") or []:
+        variants.append(
+            {
+                "title": v.get("title", ""),
+                "sku": v.get("sku") or "",
+                "price": v.get("price") or "",
+                "compare_at_price": v.get("compare_at_price") or "",
+                "available": bool(v.get("available")),
+                "image": _variant_image(p, v),
+                "grams": v.get("grams"),
+                "barcode": _barcode(p, v),
+            }
+        )
+    return {
+        "title": p.get("title", ""),
+        "url": _product_url(p, base_url),
+        "vendor": p.get("vendor", ""),
+        "product_type": p.get("product_type", ""),
+        "platform": "WooCommerce" if info else "Shopify",
+        "tags": _tags(p),
+        "collections": _collections(p),
+        "description": _plain_text(p.get("body_html")),
+        "short_description": _plain_text(info.get("short_description")),
+        "options": [{"name": o.get("name", ""), "values": o.get("values") or []} for o in opts],
+        "attributes": [{"name": a.get("name", ""), "terms": a.get("terms") or []} for a in info.get("attributes") or []],
+        "images": [{"src": i["src"], "alt": i.get("alt") or ""} for i in _images(p)],
+        "variants": variants,
+        "rating": d.get("rating_value") or (info.get("average_rating") if info.get("review_count") else "") or "",
+        "review_count": d.get("review_count") or info.get("review_count") or "",
+        "reviews": [
+            {k: r.get(k, "") for k in ("reviewer", "rating", "date", "title", "body", "verified")}
+            for r in (p.get("_reviews") or [])[:50]
+        ],
+        "review_total": len(p.get("_reviews") or []),
+        "seo_title": d.get("seo_title", ""),
+        "seo_description": d.get("seo_description", ""),
+    }
 
 
 def to_full_json_item(p):
@@ -604,4 +730,6 @@ def to_full_json_item(p):
         item["woocommerce"] = p["_woo"]
     if p.get("_details"):
         item["details"] = p["_details"]
+    if p.get("_reviews"):
+        item["reviews"] = p["_reviews"]
     return item

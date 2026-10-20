@@ -1,5 +1,6 @@
 // Product data -> Shopify CSV, WooCommerce CSV, full-details CSV and JSON. Mirrors the Python exporters.
 import { writeCsv, pf, unescapeHtml } from "./util.js";
+import { writeXlsx } from "./xlsx.js";
 
 export const SHOPIFY_HEADERS = [
   "Handle", "Title", "Body (HTML)", "Vendor", "Product Category", "Type", "Tags",
@@ -17,6 +18,13 @@ export const SHOPIFY_HEADERS = [
   "Google Shopping / Custom Label 2", "Google Shopping / Custom Label 3",
   "Google Shopping / Custom Label 4",
   "Variant Image", "Variant Weight Unit", "Variant Tax Code", "Cost per item", "Status",
+];
+
+export const LINK_HEADER = "Product URL";
+
+export const REVIEW_HEADERS = [
+  "Product ID", "Product Handle", "Product Title", "Product URL", "Review ID", "Reviewer", "Rating",
+  "Date", "Title", "Review", "Verified", "Source",
 ];
 
 const WOO_ATTRIBUTES = 3;
@@ -140,7 +148,10 @@ const kg = (grams) => (grams ? pf(Math.round((grams / 1000) * 1000) / 1000) : ""
 
 // --------------------------------------------------------------------------- Shopify
 
-export function toShopifyCsv(products) {
+const productUrl = (p, baseUrl = "") => p._url || (p.handle && baseUrl ? `${baseUrl}/products/${p.handle}` : "");
+
+/** `includeLink` adds a trailing "Product URL" column on each product's first row. */
+export function toShopifyCsv(products, includeLink = false, baseUrl = "") {
   const rows = [];
   for (const p of products) {
     const handle = p.handle || String(p.id);
@@ -157,6 +168,7 @@ export function toShopifyCsv(products) {
           Tags: tagsOf(p).join(", "), Published: "TRUE", "Gift Card": "FALSE",
           "SEO Title": d.seo_title || "", "SEO Description": d.seo_description || "", Status: "active",
         });
+        if (includeLink) row[LINK_HEADER] = productUrl(p, baseUrl);
       }
       if (i < variants.length) {
         const v = variants[i];
@@ -186,7 +198,7 @@ export function toShopifyCsv(products) {
       rows.push(row);
     }
   }
-  return writeCsv(SHOPIFY_HEADERS, rows);
+  return writeCsv(includeLink ? [...SHOPIFY_HEADERS, LINK_HEADER] : SHOPIFY_HEADERS, rows);
 }
 
 // --------------------------------------------------------------------------- WooCommerce
@@ -261,7 +273,7 @@ function wooSourceRows(p, skuById) {
   return [parent];
 }
 
-export function toWooCommerceCsv(products) {
+export function toWooCommerceCsv(products, includeLink = false, baseUrl = "") {
   const rows = [];
   let nAttr = WOO_ATTRIBUTES;
   const skuById = new Map();
@@ -272,7 +284,16 @@ export function toWooCommerceCsv(products) {
     }
   }
   for (const p of products) {
-    if (p._woo) { rows.push(...wooSourceRows(p, skuById)); continue; }
+    const start = rows.length;
+    appendWooRows(rows, p, skuById);
+    if (includeLink && rows.length > start) rows[start][LINK_HEADER] = productUrl(p, baseUrl);
+  }
+  return writeCsv(includeLink ? [...wooHeaders(nAttr), LINK_HEADER] : wooHeaders(nAttr), rows);
+}
+
+function appendWooRows(rows, p, skuById) {
+  {
+    if (p._woo) { rows.push(...wooSourceRows(p, skuById)); return; }
     const variants = p.variants || [];
     const imageUrls = imagesOf(p).map((i) => i.src).join(", ");
     const categories = unique([p.product_type || "", ...collectionsOf(p)]).join(", ");
@@ -285,7 +306,7 @@ export function toWooCommerceCsv(products) {
       rows.push({ ...base, Type: "simple", SKU: v.sku || "", Name: p.title || "", Description: p.body_html || "",
         "In stock?": (v.available === undefined ? true : v.available) ? 1 : 0, "Weight (kg)": kg(v.grams),
         "Sale price": sale, "Regular price": regular, Categories: categories, Tags: tagsOf(p).join(", "), Images: imageUrls });
-      continue;
+      return;
     }
 
     const opts = optionsOf(p);
@@ -322,12 +343,15 @@ export function toWooCommerceCsv(products) {
       rows.push(row);
     });
   }
-  return writeCsv(wooHeaders(nAttr), rows);
 }
 
 // --------------------------------------------------------------------------- full details
 
 export function toFullCsv(products, baseUrl = "") {
+  return writeCsv(FULL_HEADERS, fullRows(products, baseUrl));
+}
+
+export function fullRows(products, baseUrl = "") {
   const rows = [];
   for (const p of products) {
     const d = detailsOf(p);
@@ -391,7 +415,70 @@ export function toFullCsv(products, baseUrl = "") {
       });
     }
   }
-  return writeCsv(FULL_HEADERS, rows);
+  return rows;
+}
+
+// --------------------------------------------------------------------------- reviews, Excel, details view
+
+export function reviewRows(products, baseUrl = "") {
+  const rows = [];
+  for (const p of products) {
+    for (const r of p._reviews || []) {
+      rows.push({
+        "Product ID": p.id ?? "", "Product Handle": p.handle || "", "Product Title": p.title || "",
+        "Product URL": productUrl(p, baseUrl), "Review ID": r.id ?? "", Reviewer: r.reviewer || "",
+        Rating: r.rating ?? "", Date: r.date || "", Title: r.title || "", Review: r.body || "",
+        Verified: r.verified || "", Source: r.source || "",
+      });
+    }
+  }
+  return rows;
+}
+
+export const toReviewsCsv = (products, baseUrl = "") => writeCsv(REVIEW_HEADERS, reviewRows(products, baseUrl));
+
+const NUMBER_COLUMNS = ["Price", "Compare At Price", "Product Min Price", "Product Max Price", "Variant Count",
+  "Image Count", "Weight (grams)", "Weight (kg)", "Length (cm)", "Width (cm)", "Height (cm)", "Review Count", "Rating"];
+
+/** An Excel workbook: Products (same columns as the full-details CSV) plus Reviews when there are any. */
+export function toXlsx(products, baseUrl = "") {
+  const sheets = [{ name: "Products", headers: FULL_HEADERS, rows: fullRows(products, baseUrl), numberColumns: NUMBER_COLUMNS }];
+  const reviews = reviewRows(products, baseUrl);
+  if (reviews.length) sheets.push({ name: "Reviews", headers: REVIEW_HEADERS, rows: reviews, numberColumns: ["Rating"] });
+  return writeXlsx(sheets);
+}
+
+/** Everything worth showing about one product, as plain text and numbers (safe to render without HTML). */
+export function detailView(p, baseUrl = "") {
+  const d = detailsOf(p);
+  const info = p._woo || {};
+  const isWoo = Object.keys(info).length > 0;
+  return {
+    title: p.title || "",
+    url: productUrl(p, baseUrl),
+    vendor: p.vendor || "",
+    product_type: p.product_type || "",
+    platform: isWoo ? "WooCommerce" : "Shopify",
+    tags: tagsOf(p),
+    collections: collectionsOf(p),
+    description: plainText(p.body_html),
+    short_description: plainText(info.short_description),
+    options: optionsOf(p).map((o) => ({ name: o.name || "", values: o.values || [] })),
+    attributes: (info.attributes || []).map((a) => ({ name: a.name || "", terms: a.terms || [] })),
+    images: imagesOf(p).map((i) => ({ src: i.src, alt: i.alt || "" })),
+    variants: (p.variants || []).map((v) => ({
+      title: v.title || "", sku: v.sku || "", price: v.price || "", compare_at_price: v.compare_at_price || "",
+      available: !!v.available, image: variantImage(p, v), grams: v.grams ?? null, barcode: barcode(p, v),
+    })),
+    rating: d.rating_value || (info.review_count ? info.average_rating : "") || "",
+    review_count: d.review_count || info.review_count || "",
+    reviews: (p._reviews || []).slice(0, 50).map((r) => ({
+      reviewer: r.reviewer ?? "", rating: r.rating ?? "", date: r.date ?? "", title: r.title ?? "", body: r.body ?? "", verified: r.verified ?? "",
+    })),
+    review_total: (p._reviews || []).length,
+    seo_title: d.seo_title || "",
+    seo_description: d.seo_description || "",
+  };
 }
 
 export function toFullJsonItem(p) {
@@ -401,6 +488,7 @@ export function toFullJsonItem(p) {
   if (p._url) item.url = p._url;
   if (p._woo) item.woocommerce = p._woo;
   if (p._details && Object.keys(p._details).length) item.details = p._details;
+  if (p._reviews && p._reviews.length) item.reviews = p._reviews;
   return item;
 }
 

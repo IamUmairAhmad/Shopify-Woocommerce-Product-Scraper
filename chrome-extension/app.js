@@ -1,5 +1,5 @@
 import { ScrapeError, createCtx } from "./lib/util.js";
-import { parseStoreInput } from "./lib/shopify.js";
+import { parseStoreInput, parseHandles } from "./lib/shopify.js";
 import { run, listCollections, summarize } from "./lib/pipeline.js";
 import * as ex from "./lib/exporters.js";
 
@@ -45,32 +45,57 @@ const errText = (e) => (e instanceof ScrapeError ? e.message : "Something went w
 
 function updateScopeUi() {
   const scope = $("scope").value;
-  $("collectionField").hidden = scope !== "collection";
+  $("collectionField").hidden = scope !== "collections";
+  $("productsField").hidden = scope !== "products";
+  $("searchField").hidden = scope !== "search";
   $("pagesField").hidden = scope !== "pages";
-  if (scope === "collection") loadCollections();
+  if (scope === "collections") loadCollections();
+}
+
+let picked = new Set();
+const updatePicked = () => { $("collectionCount").textContent = picked.size ? picked.size + " selected" : ""; };
+
+function renderCollectionList(items) {
+  const box = $("collectionList");
+  box.textContent = "";
+  if (!items.length) { box.appendChild(el("span", { class: "picked", text: "No collections found." })); return; }
+  for (const c of items) {
+    const cb = el("input", { type: "checkbox", value: c.handle });
+    cb.checked = picked.has(c.handle);
+    cb.addEventListener("change", () => { cb.checked ? picked.add(c.handle) : picked.delete(c.handle); updatePicked(); });
+    const label = el("label", {}, [cb, el("span", { text: c.title })]);
+    if (c.products_count != null) label.appendChild(el("small", { text: String(c.products_count) }));
+    label.dataset.search = c.title.toLowerCase();
+    box.appendChild(label);
+  }
+}
+
+function filterCollections() {
+  const q = $("collectionFilter").value.trim().toLowerCase();
+  for (const node of $("collectionList").children) {
+    if (node.dataset && node.dataset.search !== undefined) node.hidden = !!q && !node.dataset.search.includes(q);
+  }
 }
 
 async function loadCollections() {
   const raw = $("store").value.trim();
   const key = raw + "|" + $("platform").value;
   if (!raw || collectionsFor === key) return;
-  const sel = $("collection");
-  sel.textContent = "";
-  sel.appendChild(el("option", { value: "", text: "Loading…" }));
+  const box = $("collectionList");
+  box.textContent = "";
+  box.appendChild(el("span", { class: "picked", text: "Loading…" }));
+  picked = new Set();
+  updatePicked();
   try {
     const { base } = parseStoreInput(raw);
     await ensureAccess(base);
     const d = await listCollections(base, $("platform").value);
     collectionsFor = key;
-    sel.textContent = "";
-    if (!d.collections.length) { sel.appendChild(el("option", { value: "", text: "No collections found" })); return; }
-    for (const c of d.collections) {
-      const label = c.title + (c.products_count != null ? ` (${c.products_count})` : "");
-      sel.appendChild(el("option", { value: c.handle, text: label }));
-    }
+    renderCollectionList(d.collections);
+    filterCollections();
   } catch (e) {
-    sel.textContent = "";
-    sel.appendChild(el("option", { value: "", text: "Couldn't load collections" }));
+    box.textContent = "";
+    box.appendChild(el("span", { class: "picked", text: "Couldn't load the list." }));
     setStatus(errText(e), true);
   }
 }
@@ -98,8 +123,10 @@ function render() {
       ? el("img", { class: "thumb", src: p.image, alt: "", loading: "lazy", referrerpolicy: "no-referrer" })
       : el("div", { class: "thumb" });
     const titleCell = el("td", { class: "title" });
-    if (p.url) titleCell.appendChild(el("a", { href: p.url, target: "_blank", rel: "noopener noreferrer", text: p.title }));
-    else titleCell.textContent = p.title;
+    const open = el("button", { type: "button", class: "linklike", text: p.title || "(untitled)" });
+    open.addEventListener("click", () => showDetails(p));
+    titleCell.appendChild(open);
+    if (p.url) titleCell.appendChild(el("a", { class: "ext", href: p.url, target: "_blank", rel: "noopener noreferrer", text: "Open on the store" }));
     body.appendChild(el("tr", {}, [
       el("td", {}, [cb]), el("td", {}, [img]), titleCell,
       el("td", { text: p.vendor }), el("td", { text: p.product_type }),
@@ -120,7 +147,7 @@ function render() {
 function updateCount() {
   $("count").textContent = `${state.selected.size} of ${state.summaries.length} selected for export`;
   const none = state.selected.size === 0;
-  for (const id of ["expFull", "expShopify", "expWoo", "expJson"]) $(id).disabled = none;
+  for (const id of ["expFull", "expXlsx", "expShopify", "expWoo", "expReviews", "expJson"]) $(id).disabled = none;
 }
 
 function showResult() {
@@ -139,6 +166,95 @@ function showResult() {
   $("results").scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
 }
 
+// --------------------------------------------------------------------------- product details
+
+  function section(title, node) {
+    return el("section", { class: "detail-sec" }, [el("h3", { text: title }), node]);
+  }
+
+  function pills(list) {
+    return el("div", { class: "pills" }, list.map(function (t) { return el("span", { class: "pill", text: t }); }));
+  }
+
+  function renderDetails(d, product) {
+    var body = $("detailBody");
+    body.textContent = "";
+    var meta = el("p", { class: "meta" });
+    [["Platform", d.platform], ["Vendor", d.vendor], ["Type", d.product_type]].forEach(function (kv) {
+      if (kv[1]) { meta.appendChild(el("span", {}, [document.createTextNode(kv[0] + " "), el("b", { text: kv[1] })])); }
+    });
+    if (d.rating) meta.appendChild(el("span", {}, [document.createTextNode("Rating "), el("b", { text: d.rating + (d.review_count ? " (" + d.review_count + ")" : "") })]));
+    if (d.url) meta.appendChild(el("a", { href: d.url, target: "_blank", rel: "noopener noreferrer", text: "Open on the store" }));
+    body.appendChild(meta);
+
+    if (d.images.length) {
+      var g = el("div", { class: "gallery" });
+      d.images.slice(0, 30).forEach(function (im) {
+        g.appendChild(el("img", { src: im.src, alt: im.alt, loading: "lazy", referrerpolicy: "no-referrer" }));
+      });
+      body.appendChild(g);
+    }
+    if (d.short_description) body.appendChild(section("Short description", el("p", { text: d.short_description })));
+    if (d.description) body.appendChild(section("Description", el("p", { text: d.description })));
+
+    var opts = d.options.filter(function (o) { return !(o.name === "Title" && o.values.join() === "Default Title"); });
+    if (opts.length) {
+      var wrap = el("div", {});
+      opts.forEach(function (o) { wrap.appendChild(el("p", { text: o.name + ": " + o.values.join(", ") })); });
+      body.appendChild(section("Options", wrap));
+    }
+    var others = d.attributes.filter(function (a) { return !opts.some(function (o) { return o.name === a.name; }); });
+    if (others.length) {
+      var aw = el("div", {});
+      others.forEach(function (a) { aw.appendChild(el("p", { text: a.name + ": " + a.terms.join(", ") })); });
+      body.appendChild(section("Attributes", aw));
+    }
+
+    var rows = d.variants.map(function (v) {
+      return el("tr", {}, [
+        el("td", { text: v.title }), el("td", { text: v.sku }),
+        el("td", { class: "num", text: v.price + (v.compare_at_price ? " (was " + v.compare_at_price + ")" : "") }),
+        el("td", { text: v.available ? "In stock" : "Out of stock" }),
+        el("td", { text: v.barcode || "" })
+      ]);
+    });
+    var table = el("table", { class: "vtable" }, [
+      el("thead", {}, [el("tr", {}, ["Variant", "SKU", "Price", "Stock", "Barcode"].map(function (h) { return el("th", { text: h }); }))]),
+      el("tbody", {}, rows)
+    ]);
+    body.appendChild(section("Variants (" + d.variants.length + ")", el("div", { class: "vwrap" }, [table])));
+
+    if (d.collections.length) body.appendChild(section("Collections and categories", pills(d.collections)));
+    if (d.tags.length) body.appendChild(section("Tags", pills(d.tags)));
+    if (d.seo_title || d.seo_description) {
+      body.appendChild(section("SEO", el("p", { text: [d.seo_title, d.seo_description].filter(Boolean).join("\n") })));
+    }
+    if (d.reviews.length) {
+      var rw = el("div", {});
+      d.reviews.forEach(function (r) {
+        var head = [r.reviewer || "Anonymous", r.rating ? r.rating + "/5" : "", r.date ? r.date.slice(0, 10) : ""].filter(Boolean).join(" · ");
+        rw.appendChild(el("div", { class: "review" }, [
+          el("b", { text: r.title || head }), r.title ? el("small", { text: "  " + head }) : document.createTextNode(""),
+          el("p", { text: r.body })
+        ]));
+      });
+      var more = d.review_total > d.reviews.length ? " (showing " + d.reviews.length + " of " + d.review_total + ")" : "";
+      body.appendChild(section("Reviews (" + d.review_total + ")" + more, rw));
+    }
+  }
+
+function showDetails(summary) {
+  const p = state.products.find((x) => x.id === summary.id);
+  if (!p) return;
+  const dlg = $("detail");
+  const d = ex.detailView(p, state.base);
+  $("detailTitle").textContent = d.title || "Product";
+  renderDetails(d, p);
+  if (!dlg.open) dlg.showModal();
+}
+$("detailClose").addEventListener("click", () => $("detail").close());
+$("detail").addEventListener("click", function (ev) { if (ev.target === this) this.close(); });
+
 // --------------------------------------------------------------------------- export
 
 function download(name, data, mime) {
@@ -156,13 +272,19 @@ function doExport(format, button) {
   try {
     const all = state.selected.size === state.products.length;
     const products = all ? state.products : state.products.filter((p) => state.selected.has(p.id));
+    const link = $("optLink").checked;
     const host = state.base.split("://")[1].replace(/[^A-Za-z0-9.-]+/g, "_");
     const files = {
       full: [`${host}-full-details.csv`, () => ex.toFullCsv(products, state.base), "text/csv"],
-      shopify: [`${host}-shopify.csv`, () => ex.toShopifyCsv(products), "text/csv"],
-      woocommerce: [`${host}-woocommerce.csv`, () => ex.toWooCommerceCsv(products), "text/csv"],
+      xlsx: [`${host}-products.xlsx`, () => ex.toXlsx(products, state.base), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"],
+      shopify: [`${host}-shopify.csv`, () => ex.toShopifyCsv(products, link, state.base), "text/csv"],
+      woocommerce: [`${host}-woocommerce.csv`, () => ex.toWooCommerceCsv(products, link, state.base), "text/csv"],
+      reviews: [`${host}-reviews.csv`, () => ex.toReviewsCsv(products, state.base), "text/csv"],
       json: [`${host}-products.json`, () => ex.toJson(products), "application/json"],
     };
+    if (format === "reviews" && !products.some((p) => (p._reviews || []).length)) {
+      throw new ScrapeError("No reviews were collected. Turn on \"Product reviews\" and find the products again (some stores publish none).");
+    }
     const [name, build, mime] = files[format];
     download(name, build(), mime);
     setStatus("Downloaded " + name, false);
@@ -175,12 +297,13 @@ function doExport(format, button) {
 
 // --------------------------------------------------------------------------- progress
 
-const PHASE_LABELS = { products: "Products", collections: "Collections", variations: "Variations", details: "Deep details" };
+const PHASE_LABELS = { products: "Products", collections: "Collections", variations: "Variations", reviews: "Reviews", details: "Deep details" };
 
 function renderPhases(phase, platform) {
   const order = ["products"];
   if ($("optCollections").checked) order.push("collections");
   if ($("optVariations").checked && platform === "woocommerce") order.push("variations");
+  if ($("optReviews").checked) order.push("reviews");
   if ($("optDeep").checked) order.push("details");
   const at = order.indexOf(phase);
   const list = $("phases");
@@ -200,7 +323,7 @@ function makeReport(warnings) {
     const pct = (d, t) => (t ? (100 * d) / t : null);
     const v = phase === "collections" ? pct(progress.collections_done, progress.collections_total)
       : phase === "variations" ? pct(progress.variations_done, progress.variations_total)
-      : phase === "details" ? pct(progress.details_done, progress.details_total) : null;
+      : phase === "reviews" || phase === "details" ? pct(progress.details_done, progress.details_total) : null;
     const fill = $("barFill");
     if (v === null || v === undefined) { fill.className = "fill indeterminate"; fill.style.width = ""; }
     else { fill.className = "fill"; fill.style.width = v + "%"; }
@@ -230,16 +353,23 @@ async function start(ev) {
   let parsed;
   try { parsed = parseStoreInput($("store").value); } catch (e) { setStatus(errText(e), true); return; }
   const scope = $("scope").value;
-  let collection = null, pageFrom = 1, pageTo = null;
-  if (scope === "collection") {
-    collection = ($("collection").value || "").trim() || parsed.collection;
-    if (!collection) { setStatus("Choose a collection or category.", true); return; }
+  let collections = [], handles = [], search = "", pageFrom = 1, pageTo = null;
+  if (scope === "collections") {
+    collections = Array.from(picked);
+    if (!collections.length && parsed.collection) collections = [parsed.collection];
+    if (!collections.length) { setStatus("Tick at least one collection or category.", true); return; }
+  } else if (scope === "products") {
+    handles = parseHandles($("productsText").value);
+    if (!handles.length) { setStatus("Add at least one product link or handle.", true); return; }
+  } else if (scope === "search") {
+    search = $("query").value.trim();
+    if (!search) { setStatus("Type a keyword to search for.", true); return; }
   } else if (scope === "pages") {
     pageFrom = parseInt($("pageFrom").value || "1", 10);
     pageTo = parseInt($("pageTo").value || String(pageFrom), 10);
     if (!(pageFrom >= 1) || !(pageTo >= pageFrom)) { setStatus("Enter a valid page range.", true); return; }
   } else if (parsed.collection) {
-    collection = parsed.collection;
+    collections = [parsed.collection];
   }
 
   // Must be the first await after the click so the browser accepts the permission prompt.
@@ -259,7 +389,7 @@ async function start(ev) {
   let error = null;
   try {
     await run(parsed.base, {
-      collection, pageFrom, pageTo, includeCollections: $("optCollections").checked,
+      collections, handles, search, reviews: $("optReviews").checked, pageFrom, pageTo, includeCollections: $("optCollections").checked,
       deep: $("optDeep").checked, platform: $("platform").value, variations: $("optVariations").checked,
     }, makeReport(warnings), ctx, products);
   } catch (e) {
@@ -290,8 +420,8 @@ $("stopBtn").addEventListener("click", function () {
 });
 $("scope").addEventListener("change", updateScopeUi);
 $("store").addEventListener("input", () => { collectionsFor = null; });
-$("store").addEventListener("change", () => { if ($("scope").value === "collection") loadCollections(); });
-$("platform").addEventListener("change", () => { collectionsFor = null; if ($("scope").value === "collection") loadCollections(); });
+$("store").addEventListener("change", () => { if ($("scope").value === "collections") loadCollections(); });
+$("platform").addEventListener("change", () => { collectionsFor = null; if ($("scope").value === "collections") loadCollections(); });
 $("filter").addEventListener("input", applyFilter);
 $("selectAll").addEventListener("change", function () {
   const on = this.checked;
@@ -299,6 +429,9 @@ $("selectAll").addEventListener("change", function () {
   render();
 });
 $("expFull").addEventListener("click", function () { doExport("full", this); });
+$("expXlsx").addEventListener("click", function () { doExport("xlsx", this); });
+$("expReviews").addEventListener("click", function () { doExport("reviews", this); });
+$("collectionFilter").addEventListener("input", filterCollections);
 $("expShopify").addEventListener("click", function () { doExport("shopify", this); });
 $("expWoo").addEventListener("click", function () { doExport("woocommerce", this); });
 $("expJson").addEventListener("click", function () { doExport("json", this); });

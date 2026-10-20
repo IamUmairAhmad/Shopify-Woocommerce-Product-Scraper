@@ -146,7 +146,7 @@ function slim(item) {
   return item;
 }
 
-export async function fetchProducts(api, { categoryId = null, pageFrom = 1, pageTo = null, delay = 0.4, progress, out = [] } = {}, ctx = NO_CTX) {
+export async function fetchProducts(api, { categoryId = null, pageFrom = 1, pageTo = null, delay = 0.4, progress, out = [], search = null } = {}, ctx = NO_CTX) {
   const seen = new Set(out.map((p) => p.id));
   const first = Math.max(1, parseInt(pageFrom || 1, 10));
   let page = first;
@@ -154,7 +154,7 @@ export async function fetchProducts(api, { categoryId = null, pageFrom = 1, page
     if (ctx.stopped()) break;
     if (pageTo && page > parseInt(pageTo, 10)) break;
     const headers = {};
-    const url = api.url(PRODUCTS_ROUTE, { per_page: PAGE_SIZE, page, category: categoryId });
+    const url = api.url(PRODUCTS_ROUTE, { per_page: PAGE_SIZE, page, category: categoryId, search: search || null });
     const { status, body } = await fetchRaw(url, { headersOut: headers, allowStatuses: [400] }, ctx);
     if (status === 400) {
       if (page > first) break; // asked for a page past the end
@@ -174,6 +174,31 @@ export async function fetchProducts(api, { categoryId = null, pageFrom = 1, page
     await sleep(delay, ctx);
   }
   return out;
+}
+
+/** Fetch specific products by slug. Only an exact slug match is accepted. Resolves to {products, missing}. */
+export async function fetchProductsBySlug(api, slugs, { workers = 4, delay = 0.15, progress, out = [] } = {}, ctx = NO_CTX) {
+  const seen = new Set(out.map((p) => p.id));
+  const found = new Map();
+  let done = 0;
+  await pool(slugs, workers, async (slug) => {
+    if (ctx.stopped()) return;
+    const { status, body } = await fetchRaw(api.url(PRODUCTS_ROUTE, { slug, per_page: 10 }), { allowStatuses: [400] }, ctx);
+    const items = status === 200 ? parseJson(body) : null;
+    for (const it of Array.isArray(items) ? items : []) {
+      if (isObj(it) && String(it.slug ?? "").toLowerCase() === slug.toLowerCase()) { found.set(slug, slim(it)); break; }
+    }
+    await sleep(delay, ctx);
+    done++;
+    if (progress) progress({ page: done, count: found.size });
+  });
+  const missing = [];
+  for (const slug of slugs) {
+    const it = found.get(slug);
+    if (!it) missing.push(slug);
+    else if (!seen.has(it.id)) { seen.add(it.id); out.push(it); }
+  }
+  return { products: out, missing };
 }
 
 async function productVariations(api, product, ctx) {
@@ -227,6 +252,57 @@ export async function fetchVariations(api, products, { workers = 4, delay = 0.15
     if (progress) progress({ done, total: targets.length });
   });
   return failed;
+}
+
+// --------------------------------------------------------------------------- reviews
+
+export const REVIEWS_ROUTE = "/wc/store/v1/products/reviews";
+const NO_REVIEWS = "This store doesn't publish reviews through its public API.";
+
+const cleanText = (frag) => unescapeHtml((frag || "").replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim();
+
+export function normalizeReview(raw) {
+  return {
+    id: raw.id, product_id: raw.product_id, reviewer: text(raw.reviewer),
+    rating: String(raw.rating !== null && raw.rating !== undefined ? raw.rating : ""),
+    date: raw.date_created_gmt || raw.date_created || "", title: "", body: cleanText(raw.review),
+    verified: raw.verified ? "TRUE" : "FALSE", source: "woocommerce",
+  };
+}
+
+/** Every public review of the store. Resolves to {reviews, reason}. */
+export async function fetchReviews(api, { workers = 4, delay = 0.15, progress } = {}, ctx = NO_CTX) {
+  const headers = {};
+  const { status, body } = await fetchRaw(api.url(REVIEWS_ROUTE, { per_page: PAGE_SIZE, page: 1 }), { headersOut: headers, allowStatuses: [400, 404] }, ctx);
+  const first = status === 200 ? parseJson(body) : null;
+  if (!Array.isArray(first)) return { reviews: [], reason: NO_REVIEWS };
+  let reviews = [...first];
+  const totalPages = toInt(headers["x-wp-totalpages"]);
+  let pages = [];
+  for (let i = 2; i <= totalPages; i++) pages.push(i);
+  if (!totalPages && first.length >= PAGE_SIZE) {
+    for (let page = 2; !ctx.stopped(); page++) {
+      const r = await fetchRaw(api.url(REVIEWS_ROUTE, { per_page: PAGE_SIZE, page }), { allowStatuses: [400] }, ctx);
+      const items = r.status === 200 ? parseJson(r.body) : null;
+      if (!Array.isArray(items) || !items.length) break;
+      reviews.push(...items);
+      if (items.length < PAGE_SIZE) break;
+    }
+  }
+  if (progress) progress({ done: 1, total: Math.max(totalPages, 1) });
+  const results = new Map();
+  let done = 1;
+  await pool(pages, workers, async (page) => {
+    if (ctx.stopped()) return;
+    const r = await fetchRaw(api.url(REVIEWS_ROUTE, { per_page: PAGE_SIZE, page }), { allowStatuses: [400] }, ctx);
+    const items = r.status === 200 ? parseJson(r.body) : null;
+    if (Array.isArray(items)) results.set(page, items);
+    done++;
+    if (progress) progress({ done, total: totalPages });
+    await sleep(delay, ctx);
+  });
+  for (const page of [...results.keys()].sort((a, b) => a - b)) reviews.push(...results.get(page));
+  return { reviews: reviews.filter(isObj).map(normalizeReview), reason: "" };
 }
 
 // --------------------------------------------------------------------------- normalising

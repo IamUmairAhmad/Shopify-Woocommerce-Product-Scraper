@@ -10,7 +10,7 @@
 <main>
   <p class="masthead"><span class="mark" aria-hidden="true"></span>Store Product Exporter</p>
   <h1>Paste a store. Get the whole catalogue.</h1>
-  <p class="lede">Works on <strong>Shopify</strong> and <strong>WooCommerce</strong> stores. Titles, images, variations, prices, categories and more, exported as CSV or JSON. No limit on the number of products, and everything runs in your browser.</p>
+  <p class="lede">Works on <strong>Shopify</strong> and <strong>WooCommerce</strong> stores. Titles, images, variations, prices, categories and more, exported as CSV, Excel or JSON. No limit on the number of products, and everything runs in your browser.</p>
 
   <form id="form" autocomplete="off">
     <div class="address">
@@ -35,13 +35,25 @@
             <label for="scope">Scope</label>
             <select id="scope">
               <option value="all">All products</option>
-              <option value="collection">One collection or category</option>
+              <option value="collections">Collections or categories</option>
+              <option value="products">Specific products</option>
+              <option value="search">Keyword search</option>
               <option value="pages">A range of pages</option>
             </select>
           </div>
-          <div class="field" id="collectionField" hidden>
-            <label for="collection">Collection or category</label>
-            <select id="collection"><option value="">Load collections…</option></select>
+          <fieldset class="picker wide" id="collectionField" hidden>
+            <legend>Collections or categories</legend>
+            <input id="collectionFilter" class="filter" type="text" placeholder="Filter the list…" aria-label="Filter collections">
+            <div class="picklist" id="collectionList"><span class="picked">Enter a store above to load its list.</span></div>
+            <p class="picked" id="collectionCount" aria-live="polite"></p>
+          </fieldset>
+          <div class="field wide" id="productsField" hidden>
+            <label for="productsText">Product links or handles, one per line</label>
+            <textarea id="productsText" class="box" placeholder="https://example-store.com/products/some-product&#10;another-product-handle" spellcheck="false"></textarea>
+          </div>
+          <div class="field wide" id="searchField" hidden>
+            <label for="query">Keywords (every word must match the title, vendor, type, tags or SKU)</label>
+            <input id="query" class="text" type="text" placeholder="running shoe" spellcheck="false">
           </div>
           <div class="field" id="pagesField" hidden>
             <span id="pagesLabel">Pages (250 per page on Shopify, 100 on WooCommerce)</span>
@@ -61,6 +73,8 @@
             <span><b>Collections and categories</b><small>Shopify: maps each product to its collections. WooCommerce: keeps the category tree with parents.</small></span></label>
           <label class="toggle"><input type="checkbox" id="optVariations" checked>
             <span><b>Variation prices and SKUs</b><small>WooCommerce only. One request per variable product; turn off for a faster scrape.</small></span></label>
+          <label class="toggle"><input type="checkbox" id="optReviews">
+            <span><b>Product reviews</b><small>WooCommerce: every public review. Shopify: reviews the product page publishes as structured data (apps like Judge.me or Yotpo usually don't). Adds a reviews export.</small></span></label>
           <label class="toggle"><input type="checkbox" id="optDeep">
             <span><b>Deep details</b><small>SEO title and description, structured data, barcodes, videos, and on WooCommerce weight and dimensions. Slower: one extra request per product.</small></span></label>
         </div>
@@ -111,13 +125,24 @@
       <span class="sel" id="count"></span>
       <div class="formats">
         <button id="expFull" type="button" class="primary" title="Every detail, one row per variant">Full details CSV</button>
+        <button id="expXlsx" type="button" title="Excel workbook with the full details (and reviews)">Excel</button>
         <button id="expShopify" type="button">Shopify CSV</button>
         <button id="expWoo" type="button">WooCommerce CSV</button>
+        <button id="expReviews" type="button">Reviews CSV</button>
         <button id="expJson" type="button">JSON</button>
       </div>
+      <label class="linkopt"><input type="checkbox" id="optLink"> Add a product link column to the Shopify and WooCommerce CSVs</label>
     </div>
   </section>
 </main>
+
+<dialog id="detail" aria-labelledby="detailTitle">
+  <div class="detail-head">
+    <h2 id="detailTitle"></h2>
+    <button id="detailClose" type="button">Close</button>
+  </div>
+  <div id="detailBody"></div>
+</dialog>
 <script type="module" src="app.js"></script>
 </body>
 </html>

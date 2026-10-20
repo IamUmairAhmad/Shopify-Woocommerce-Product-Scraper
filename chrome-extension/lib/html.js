@@ -54,11 +54,31 @@ const ldTypes = (o) => {
 const GTIN_KEYS = ["gtin", "gtin13", "gtin12", "gtin14", "gtin8"];
 const firstGtin = (o) => { for (const k of GTIN_KEYS) if (o[k]) return o[k]; return ""; };
 
+const plain = (x) => unescapeHtml(String(x ?? "").replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim();
+
+function ldReview(obj) {
+  const author = obj.author;
+  const name = isObj(author) ? (author.name || "") : (author || "");
+  const rating = obj.reviewRating;
+  const value = isObj(rating) ? (rating.ratingValue ?? "") : (rating || "");
+  const body = obj.reviewBody || obj.description || "";
+  return {
+    reviewer: plain(name), rating: String(value).trim(), date: String(obj.datePublished || "").trim(),
+    title: plain(obj.name || ""), body: plain(body), verified: "", source: "structured data",
+  };
+}
+
 export function parseJsonLd(blocks) {
-  const info = { brand: "", currency: "", rating_value: "", review_count: "", gtin_by_sku: {} };
+  const info = { brand: "", currency: "", rating_value: "", review_count: "", gtin_by_sku: {}, reviews: [] };
+  const seenReviews = new Set();
   for (const block of blocks) {
     for (const obj of walkLd(block)) {
       const types = ldTypes(obj);
+      if (types.includes("Review")) {
+        const r = ldReview(obj);
+        const key = JSON.stringify([r.reviewer, r.date, r.body, r.title]);
+        if ((r.body || r.title) && !seenReviews.has(key)) { seenReviews.add(key); info.reviews.push(r); }
+      }
       if (types.includes("Product") || types.includes("ProductGroup")) {
         const brand = obj.brand;
         if (!info.brand) info.brand = isObj(brand) ? (brand.name || "") : (brand || "");

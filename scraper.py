@@ -8,6 +8,7 @@ Shopify storefronts expose their catalog as JSON:
     /products/<handle>                               product page (SEO tags, JSON-LD structured data)
 """
 
+import html as html_lib
 import ipaddress
 import json
 import os
@@ -423,11 +424,39 @@ def _ld_types(obj):
     return [t] if isinstance(t, str) else [x for x in (t or []) if isinstance(x, str)]
 
 
+def _ld_review(obj):
+    """One schema.org Review as a plain dict (the same shape the WooCommerce reviews use)."""
+    author = obj.get("author")
+    name = author.get("name", "") if isinstance(author, dict) else (author or "")
+    rating = obj.get("reviewRating")
+    value = rating.get("ratingValue", "") if isinstance(rating, dict) else (rating or "")
+    body = obj.get("reviewBody") or obj.get("description") or ""
+    def plain(x):
+        return re.sub(r"\s+", " ", html_lib.unescape(re.sub(r"<[^>]+>", " ", str(x)))).strip()
+
+    return {
+        "reviewer": plain(name),
+        "rating": str(value).strip(),
+        "date": str(obj.get("datePublished") or "").strip(),
+        "title": plain(obj.get("name") or ""),
+        "body": plain(body),
+        "verified": "",
+        "source": "structured data",
+    }
+
+
 def _parse_json_ld(blocks):
-    info = {"brand": "", "currency": "", "rating_value": "", "review_count": "", "gtin_by_sku": {}}
+    info = {"brand": "", "currency": "", "rating_value": "", "review_count": "", "gtin_by_sku": {}, "reviews": []}
+    seen_reviews = set()
     for block in blocks:
         for obj in _walk_ld(block):
             types = _ld_types(obj)
+            if "Review" in types:
+                review = _ld_review(obj)
+                key = (review["reviewer"], review["date"], review["body"], review["title"])
+                if (review["body"] or review["title"]) and key not in seen_reviews:
+                    seen_reviews.add(key)
+                    info["reviews"].append(review)
             if "Product" in types or "ProductGroup" in types:
                 brand = obj.get("brand")
                 if not info["brand"]:
@@ -448,20 +477,23 @@ def _parse_json_ld(blocks):
     return info
 
 
-def _fetch_one_details(session, base, product):
+def _fetch_one_details(session, base, product, page_only=False):
     handle = product.get("handle")
     details = {}
     if not handle or not HANDLE_RE.match(handle):
         return details
 
     try:
+        if page_only:
+            raise ScrapeError("skipped")  # reviews only: the storefront .js adds nothing we need
         status, body = _fetch(session, f"{base}/products/{handle}.js", retries=3, allow_404=True)
         if status == 200:
             js = json.loads(body.decode("utf-8", errors="replace"))
             js.pop("description", None)
             details["storefront_js"] = js
     except (ScrapeError, ValueError) as e:
-        details["js_error"] = getattr(e, "message", str(e))
+        if not page_only:
+            details["js_error"] = getattr(e, "message", str(e))
 
     try:
         status, body = _fetch(session, f"{base}/products/{handle}", retries=3, allow_404=True)
@@ -486,7 +518,7 @@ def _fetch_one_details(session, base, product):
     return details
 
 
-def fetch_details(base, products, workers=4, delay=0.15, progress=None, should_stop=_never_stop):
+def fetch_details(base, products, workers=4, delay=0.15, progress=None, should_stop=_never_stop, page_only=False):
     """Fetch the product page and storefront JSON for each product (slower, optional).
 
     Results are stored in product["_details"]. Failures for a single product are recorded
@@ -503,7 +535,7 @@ def fetch_details(base, products, workers=4, delay=0.15, progress=None, should_s
         if not hasattr(local, "session"):
             local.session = new_session("text/html,application/json")
         try:
-            p["_details"] = _fetch_one_details(local.session, base, p)
+            p["_details"] = _fetch_one_details(local.session, base, p, page_only)
         except ScrapeError as e:
             p["_details"] = {"error": e.message}
         _sleep(delay)
@@ -514,3 +546,70 @@ def fetch_details(base, products, workers=4, delay=0.15, progress=None, should_s
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
         list(pool.map(work, products))
+
+
+# --------------------------------------------------------------------------- specific products, keyword search
+
+
+def parse_handles(raw):
+    """Product links, handles or slugs (one per line or comma separated) -> a list of unique handles.
+
+    Accepts https://store.com/products/some-handle, https://store.com/product/some-slug/ (WooCommerce),
+    or just the handle itself.
+    """
+    out = []
+    for token in re.split(r"[\s,]+", raw or ""):
+        token = token.strip()
+        if not token:
+            continue
+        path = urlparse(token if "://" in token else "//" + token).path if ("/" in token or "://" in token) else token
+        m = re.search(r"/products?/([^/?#]+)", path)
+        handle = m.group(1) if m else path.strip("/")
+        if handle.lower().endswith((".json", ".js")):
+            handle = handle.rsplit(".", 1)[0]
+        if HANDLE_RE.match(handle) and handle not in out:
+            out.append(handle)
+    return out
+
+
+def fetch_products_by_handle(base, handles, delay=0.2, progress=None, should_stop=_never_stop, out=None):
+    """Fetch specific products by handle. Returns (products, missing_handles)."""
+    session = new_session()
+    products = out if out is not None else []
+    seen = {p.get("id") for p in products}
+    missing = []
+    for i, handle in enumerate(handles, start=1):
+        if should_stop():
+            break
+        status, body = _fetch(session, f"{base}/products/{handle}.json", allow_404=True)
+        item = None
+        if status == 200:
+            try:
+                item = json.loads(body.decode("utf-8", errors="replace")).get("product")
+            except (ValueError, AttributeError):
+                item = None
+        if isinstance(item, dict) and item.get("id") not in seen:
+            seen.add(item.get("id"))
+            products.append(item)
+        elif not isinstance(item, dict):
+            missing.append(handle)
+        if progress:
+            progress(page=i, count=len(products))
+        _sleep(delay)
+    return products, missing
+
+
+def product_matches(product, query):
+    """Keyword search: every word must appear in the title, handle, vendor, type, tags or a SKU."""
+    words = (query or "").lower().split()
+    if not words:
+        return True
+    tags = product.get("tags") or []
+    if isinstance(tags, str):
+        tags = [tags]
+    hay = " ".join(
+        [str(product.get(k) or "") for k in ("title", "handle", "vendor", "product_type")]
+        + [str(t) for t in tags]
+        + [str(v.get("sku") or "") for v in product.get("variants") or []]
+    ).lower()
+    return all(w in hay for w in words)

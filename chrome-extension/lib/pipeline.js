@@ -9,12 +9,17 @@ export const nullReport = { platform: noop, phase: noop, message: noop, update: 
 /**
  * Scrape a store and fill `products` (pass an array to keep partial results if it fails or is stopped).
  * platform: "auto" | "shopify" | "woocommerce". Resolves to the platform that was scraped.
+ * `collections` are Shopify collection handles or WooCommerce category slugs; `handles` are specific
+ * product handles (when given, only those are fetched); `search` is a keyword (every word must match).
  */
 export async function run(base, opts = {}, report = nullReport, ctx = NO_CTX, products = []) {
   const {
-    collection = null, pageFrom = 1, pageTo = null, includeCollections = true, deep = false,
+    pageFrom = 1, pageTo = null, includeCollections = true, deep = false, reviews = false,
     platform: wanted = "auto", variations = true,
   } = opts;
+  const collections = (opts.collections || []).filter(Boolean);
+  const handles = (opts.handles || []).filter(Boolean);
+  const search = String(opts.search || "").trim();
   report = { ...nullReport, ...report };
   let platform = wanted, api = null;
   try {
@@ -30,10 +35,11 @@ export async function run(base, opts = {}, report = nullReport, ctx = NO_CTX, pr
       throw new ScrapeError("Unknown platform.");
     }
     report.platform(platform);
+    const sel = { collections, handles, search, pageFrom, pageTo };
     if (platform === "shopify") {
-      await runShopify(base, { collection, pageFrom, pageTo, includeCollections, deep }, report, ctx, products);
+      await runShopify(base, sel, includeCollections, deep, reviews, report, ctx, products);
     } else {
-      await runWoo(api, base, { collection, pageFrom, pageTo, includeCollections, deep, variations }, report, ctx, products);
+      await runWoo(api, base, sel, includeCollections, deep, reviews, variations, report, ctx, products);
     }
   } catch (e) {
     if (!(e instanceof Stopped)) throw e; // Stop keeps whatever was fetched
@@ -41,18 +47,47 @@ export async function run(base, opts = {}, report = nullReport, ctx = NO_CTX, pr
   return platform;
 }
 
-async function runShopify(base, o, report, ctx, products) {
+function warnMissing(report, missing) {
+  if (!missing.length) return;
+  const shown = missing.slice(0, 10).join(", ") + (missing.length > 10 ? ` and ${missing.length - 10} more` : "");
+  report.warn(`${missing.length} product(s) were not found: ${shown}`);
+}
+
+function merge(products, seen, items) {
+  for (const it of items) if (!seen.has(it.id)) { seen.add(it.id); products.push(it); }
+}
+
+const attachPageReviews = (products) => { for (const p of products) p._reviews = [...((p._details || {}).reviews || [])]; };
+
+async function runShopify(base, sel, includeCollections, deep, reviews, report, ctx, products) {
   report.phase("products");
-  await shopify.fetchProducts(base, {
-    collection: o.collection, pageFrom: o.pageFrom, pageTo: o.pageTo, out: products,
-    progress: ({ page, count }) => {
-      report.update({ pages: page, products: count });
-      report.message(`Fetching products… page ${page}, ${count} found`);
-    },
-  }, ctx);
+  const onProducts = ({ page, count }) => {
+    report.update({ pages: page, products: count });
+    report.message(`Fetching products… page ${page}, ${count} found`);
+  };
+  if (sel.handles.length) {
+    const { missing } = await shopify.fetchProductsByHandle(base, sel.handles, { progress: onProducts, out: products }, ctx);
+    warnMissing(report, missing);
+  } else if (sel.collections.length > 1) {
+    // One list per collection so overlap between collections can't end a collection early.
+    const seen = new Set();
+    for (const col of sel.collections) {
+      if (ctx.stopped()) break;
+      const part = [];
+      try {
+        await shopify.fetchProducts(base, { collection: col, pageFrom: sel.pageFrom, pageTo: sel.pageTo, progress: onProducts, out: part }, ctx);
+      } finally { merge(products, seen, part); }
+    }
+  } else {
+    await shopify.fetchProducts(base, { collection: sel.collections[0] || null, pageFrom: sel.pageFrom, pageTo: sel.pageTo, progress: onProducts, out: products }, ctx);
+  }
+  if (sel.search) {
+    const kept = products.filter((p) => shopify.productMatches(p, sel.search));
+    products.splice(0, products.length, ...kept);
+  }
   if (!products.length) throw new ScrapeError("No products found for that selection.", 404);
 
-  if (o.includeCollections && !ctx.stopped()) {
+  if (includeCollections && !ctx.stopped()) {
     report.phase("collections");
     const { membership, warnings } = await shopify.fetchCollectionMembership(base, {
       progress: ({ done, total, title }) => {
@@ -65,22 +100,30 @@ async function runShopify(base, o, report, ctx, products) {
     for (const p of products) p._collections = membership.get(p.id) || [];
   }
 
-  if (o.deep && !ctx.stopped()) {
-    report.phase("details");
+  if ((deep || reviews) && !ctx.stopped()) {
+    report.phase(deep ? "details" : "reviews");
     await shopify.fetchDetails(base, products, {
+      pageOnly: !deep,
       progress: ({ done, total }) => {
         report.update({ details_done: done, details_total: total });
-        report.message(`Fetching product details… ${done}/${total}`);
+        report.message(`Fetching product ${deep ? "details" : "reviews"}… ${done}/${total}`);
       },
     }, ctx);
     const failed = products.filter((p) => (p._details || {}).page_error).length;
-    if (failed) report.warn(`${failed} product page(s) could not be read for SEO details.`);
+    if (failed) report.warn(`${failed} product page(s) could not be read` + (deep ? " for SEO details." : " for reviews."));
+    if (reviews) {
+      attachPageReviews(products);
+      if (!products.some((p) => p._reviews.length)) {
+        report.warn("No reviews were found. Shopify has no public reviews feed: reviews come from apps such as Judge.me or Yotpo, and only appear here when the product page publishes them as structured data.");
+      }
+    }
   }
 }
 
-async function runWoo(api, base, o, report, ctx, products) {
-  let categories = [], paths = new Map(), categoryId = null;
-  if (o.collection || o.includeCollections) {
+async function runWoo(api, base, sel, includeCollections, deep, reviews, variations, report, ctx, products) {
+  let categories = [], paths = new Map();
+  const collections = sel.collections;
+  if (collections.length || includeCollections) {
     report.phase("categories");
     report.message("Reading categories…");
     try {
@@ -88,26 +131,38 @@ async function runWoo(api, base, o, report, ctx, products) {
       paths = woo.categoryPaths(categories);
     } catch (e) {
       if (e instanceof Stopped) throw e;
-      if (o.collection || !(e instanceof ScrapeError)) throw e;
+      if (collections.length || !(e instanceof ScrapeError)) throw e;
       report.warn(`Category hierarchy unavailable, so categories are listed without parents: ${e.message}`);
     }
   }
-  if (o.collection) categoryId = woo.resolveCategory(categories, o.collection);
+  const categoryIds = collections.map((c) => woo.resolveCategory(categories, c));
 
   report.phase("products");
+  const onProducts = ({ page, count, total }) => {
+    report.update({ pages: page, products: count });
+    report.message(`Fetching products… page ${page}, ${count}` + (total ? ` of ${total}` : "") + " found");
+  };
   const raw = [];
   try {
-    await woo.fetchProducts(api, {
-      categoryId, pageFrom: o.pageFrom, pageTo: o.pageTo, out: raw,
-      progress: ({ page, count, total }) => {
-        report.update({ pages: page, products: count });
-        report.message(`Fetching products… page ${page}, ${count}` + (total ? ` of ${total}` : "") + " found");
-      },
-    }, ctx);
+    if (sel.handles.length) {
+      const { missing } = await woo.fetchProductsBySlug(api, sel.handles, { progress: onProducts, out: raw }, ctx);
+      warnMissing(report, missing);
+    } else if (categoryIds.length > 1) {
+      const seen = new Set();
+      for (const cid of categoryIds) {
+        if (ctx.stopped()) break;
+        const part = [];
+        try {
+          await woo.fetchProducts(api, { categoryId: cid, pageFrom: sel.pageFrom, pageTo: sel.pageTo, progress: onProducts, out: part, search: sel.search }, ctx);
+        } finally { merge(raw, seen, part); }
+      }
+    } else {
+      await woo.fetchProducts(api, { categoryId: categoryIds[0] ?? null, pageFrom: sel.pageFrom, pageTo: sel.pageTo, progress: onProducts, out: raw, search: sel.search }, ctx);
+    }
     if (!raw.length) throw new ScrapeError("No products found for that selection.", 404);
 
     const nVariable = raw.filter((r) => r.type === "variable").length;
-    if (o.variations && nVariable && !ctx.stopped()) {
+    if (variations && nVariable && !ctx.stopped()) {
       report.phase("variations");
       const failed = await woo.fetchVariations(api, raw, {
         progress: ({ done, total }) => {
@@ -116,7 +171,7 @@ async function runWoo(api, base, o, report, ctx, products) {
         },
       }, ctx);
       if (failed) report.warn(`${failed} variable product(s) had variations that couldn't be read; those variations have no price or SKU.`);
-    } else if (nVariable && !o.variations) {
+    } else if (nVariable && !variations) {
       report.warn("Variation prices and SKUs were skipped, so variable products have no per-variation prices.");
     }
   } finally {
@@ -129,7 +184,22 @@ async function runWoo(api, base, o, report, ctx, products) {
     report.warn(`${tooMany} product(s) have more than 3 variation attributes. Shopify supports 3, so the Shopify CSV drops the extras; the WooCommerce CSV, full-details CSV and JSON keep them all.`);
   }
 
-  if (o.deep && !ctx.stopped()) {
+  if (reviews && !ctx.stopped()) {
+    report.phase("reviews");
+    const { reviews: found, reason } = await woo.fetchReviews(api, {
+      progress: ({ done, total }) => {
+        report.update({ reviews_done: done, reviews_total: total });
+        report.message(`Fetching reviews… page ${done}/${total}`);
+      },
+    }, ctx);
+    const byProduct = new Map();
+    for (const r of found) { if (!byProduct.has(r.product_id)) byProduct.set(r.product_id, []); byProduct.get(r.product_id).push(r); }
+    for (const p of products) p._reviews = byProduct.get(p.id) || [];
+    if (reason) report.warn(reason);
+    else if (!products.some((p) => p._reviews.length)) report.warn("The store has no reviews for the selected products.");
+  }
+
+  if (deep && !ctx.stopped()) {
     report.phase("details");
     await woo.fetchDetails(base, products, {
       progress: ({ done, total }) => {

@@ -244,7 +244,7 @@ def _slim(item):
 
 def fetch_products(
     api, category_id=None, page_from=1, page_to=None, delay=0.4,
-    progress=None, should_stop=_never_stop, out=None,
+    progress=None, should_stop=_never_stop, out=None, search=None,
 ):
     """Fetch products page by page with no cap on the number of pages.
 
@@ -261,7 +261,7 @@ def fetch_products(
         if page_to and page > int(page_to):
             break
         headers = {}
-        url = api.url(PRODUCTS_ROUTE, per_page=PAGE_SIZE, page=page, category=category_id)
+        url = api.url(PRODUCTS_ROUTE, per_page=PAGE_SIZE, page=page, category=category_id, search=search or None)
         status, body = _fetch(session, url, headers_out=headers, allow_statuses=(400,))
         if status == 400:
             if page > first:
@@ -285,6 +285,48 @@ def fetch_products(
         page += 1
         _sleep(delay)
     return products
+
+
+def fetch_products_by_slug(api, slugs, workers=4, delay=0.15, progress=None, should_stop=_never_stop, out=None):
+    """Fetch specific products by slug. Returns (products, missing_slugs).
+
+    Only an exact slug match is accepted, so a store that ignores the filter can't return the wrong product.
+    """
+    products = out if out is not None else []
+    seen = {p.get("id") for p in products}
+    found, lock = {}, threading.Lock()
+    done = {"n": 0}
+    local = threading.local()
+
+    def work(slug):
+        if should_stop():
+            return
+        if not hasattr(local, "session"):
+            local.session = new_session()
+        status, body = _fetch(local.session, api.url(PRODUCTS_ROUTE, slug=slug, per_page=10), allow_statuses=(400,))
+        items = _json(body) if status == 200 else None
+        for it in items if isinstance(items, list) else []:
+            if isinstance(it, dict) and str(it.get("slug", "")).lower() == slug.lower():
+                with lock:
+                    found[slug] = _slim(it)
+                break
+        _sleep(delay)
+        with lock:
+            done["n"] += 1
+            if progress:
+                progress(page=done["n"], count=len(found))
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        list(pool.map(work, slugs))
+    missing = []
+    for slug in slugs:
+        it = found.get(slug)
+        if it is None:
+            missing.append(slug)
+        elif it.get("id") not in seen:
+            seen.add(it.get("id"))
+            products.append(it)
+    return products, missing
 
 
 def _product_variations(api, session, product):
@@ -361,6 +403,79 @@ def fetch_variations(api, products, workers=4, delay=0.15, progress=None, should
     with ThreadPoolExecutor(max_workers=workers) as pool:
         list(pool.map(work, targets))
     return state["failed"]
+
+
+# --------------------------------------------------------------------------- reviews
+
+REVIEWS_ROUTE = "/wc/store/v1/products/reviews"
+
+
+def normalize_review(raw):
+    return {
+        "id": raw.get("id"),
+        "product_id": raw.get("product_id"),
+        "reviewer": _text(raw.get("reviewer")),
+        "rating": str(raw.get("rating") if raw.get("rating") is not None else ""),
+        "date": raw.get("date_created_gmt") or raw.get("date_created") or "",
+        "title": "",
+        "body": _clean(raw.get("review")),
+        "verified": "TRUE" if raw.get("verified") else "FALSE",
+        "source": "woocommerce",
+    }
+
+
+def fetch_reviews(api, workers=4, delay=0.15, progress=None, should_stop=_never_stop):
+    """Every public review of the store. Returns (reviews, reason) where reason explains an empty result."""
+    session = new_session()
+    headers = {}
+    status, body = _fetch(
+        session, api.url(REVIEWS_ROUTE, per_page=PAGE_SIZE, page=1), headers_out=headers, allow_statuses=(400, 404)
+    )
+    if status != 200:
+        return [], "This store doesn't publish reviews through its public API."
+    first = _json(body)
+    if not isinstance(first, list):
+        return [], "This store doesn't publish reviews through its public API."
+    reviews = list(first)
+    total_pages = _int(headers.get("x-wp-totalpages"))
+    pages = list(range(2, total_pages + 1))
+    if not total_pages and len(first) >= PAGE_SIZE:  # no page count: walk until a short page
+        page = 2
+        while not should_stop():
+            status, body = _fetch(session, api.url(REVIEWS_ROUTE, per_page=PAGE_SIZE, page=page), allow_statuses=(400,))
+            items = _json(body) if status == 200 else None
+            if not isinstance(items, list) or not items:
+                break
+            reviews.extend(items)
+            if len(items) < PAGE_SIZE:
+                break
+            page += 1
+        pages = []
+    if progress:
+        progress(done=1, total=max(total_pages, 1))
+    local, lock = threading.local(), threading.Lock()
+    results, state = {}, {"done": 1}
+
+    def work(page):
+        if should_stop():
+            return
+        if not hasattr(local, "session"):
+            local.session = new_session()
+        st, bd = _fetch(local.session, api.url(REVIEWS_ROUTE, per_page=PAGE_SIZE, page=page), allow_statuses=(400,))
+        items = _json(bd) if st == 200 else None
+        with lock:
+            if isinstance(items, list):
+                results[page] = items
+            state["done"] += 1
+            if progress:
+                progress(done=state["done"], total=total_pages)
+        _sleep(delay)
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        list(pool.map(work, pages))
+    for page in sorted(results):
+        reviews.extend(results[page])
+    return [normalize_review(r) for r in reviews if isinstance(r, dict)], ""
 
 
 # --------------------------------------------------------------------------- normalising

@@ -128,20 +128,22 @@ export async function fetchCollectionMembership(base, { progress, delay = 0.3 } 
   return { membership, warnings };
 }
 
-async function fetchOneDetails(base, product, ctx) {
+async function fetchOneDetails(base, product, ctx, pageOnly = false) {
   const handle = product.handle;
   const details = {};
   if (!handle || !HANDLE_RE.test(handle)) return details;
-  try {
-    const { status, body } = await fetchRaw(`${base}/products/${handle}.js`, { retries: 3, allow404: true }, ctx);
-    if (status === 200) {
-      const js = JSON.parse(body);
-      delete js.description;
-      details.storefront_js = js;
+  if (!pageOnly) {
+    try {
+      const { status, body } = await fetchRaw(`${base}/products/${handle}.js`, { retries: 3, allow404: true }, ctx);
+      if (status === 200) {
+        const js = JSON.parse(body);
+        delete js.description;
+        details.storefront_js = js;
+      }
+    } catch (e) {
+      if (e instanceof Stopped) throw e;
+      details.js_error = e.message;
     }
-  } catch (e) {
-    if (e instanceof Stopped) throw e;
-    details.js_error = e.message;
   }
   try {
     const { status, body } = await fetchRaw(`${base}/products/${handle}`, { retries: 3, allow404: true, accept: "text/html,application/json" }, ctx);
@@ -153,12 +155,12 @@ async function fetchOneDetails(base, product, ctx) {
   return details;
 }
 
-export async function fetchDetails(base, products, { workers = 4, delay = 0.15, progress } = {}, ctx = NO_CTX) {
+export async function fetchDetails(base, products, { workers = 4, delay = 0.15, progress, pageOnly = false } = {}, ctx = NO_CTX) {
   let done = 0;
   await pool(products, workers, async (p) => {
     if (ctx.stopped()) return;
     try {
-      p._details = await fetchOneDetails(base, p, ctx);
+      p._details = await fetchOneDetails(base, p, ctx, pageOnly);
     } catch (e) {
       if (e instanceof Stopped) return;
       if (e instanceof ScrapeError) p._details = { error: e.message }; else throw e;
@@ -167,4 +169,58 @@ export async function fetchDetails(base, products, { workers = 4, delay = 0.15, 
     done++;
     if (progress) progress({ done, total: products.length });
   });
+}
+
+// --------------------------------------------------------------------------- specific products, keyword search
+
+/** Product links, handles or slugs (one per line or comma separated) -> unique handles. */
+export function parseHandles(raw) {
+  const out = [];
+  for (let token of String(raw || "").split(/[\s,]+/)) {
+    token = token.trim();
+    if (!token) continue;
+    let path = token;
+    if (token.includes("/") || token.includes("://")) {
+      try { path = new URL(token.includes("://") ? token : "//" + token, "https://x.invalid").pathname; } catch { path = token; }
+    }
+    const m = /\/products?\/([^/?#]+)/.exec(path);
+    let handle = m ? m[1] : path.replace(/^\/+|\/+$/g, "");
+    if (/\.(json|js)$/i.test(handle)) handle = handle.replace(/\.[^.]+$/, "");
+    if (HANDLE_RE.test(handle) && !out.includes(handle)) out.push(handle);
+  }
+  return out;
+}
+
+/** Fetch specific products by handle. Resolves to {missing}. */
+export async function fetchProductsByHandle(base, handles, { delay = 0.2, progress, out = [] } = {}, ctx = NO_CTX) {
+  const seen = new Set(out.map((p) => p.id));
+  const missing = [];
+  for (let i = 0; i < handles.length; i++) {
+    if (ctx.stopped()) break;
+    const { status, body } = await fetchRaw(`${base}/products/${handles[i]}.json`, { allow404: true }, ctx);
+    let item = null;
+    if (status === 200) { try { item = JSON.parse(body).product; } catch { item = null; } }
+    if (item && typeof item === "object" && !Array.isArray(item)) {
+      if (!seen.has(item.id)) { seen.add(item.id); out.push(item); }
+    } else {
+      missing.push(handles[i]);
+    }
+    if (progress) progress({ page: i + 1, count: out.length });
+    await sleep(delay, ctx);
+  }
+  return { products: out, missing };
+}
+
+/** Keyword search: every word must appear in the title, handle, vendor, type, tags or a SKU. */
+export function productMatches(product, query) {
+  const words = String(query || "").toLowerCase().split(/\s+/).filter(Boolean);
+  if (!words.length) return true;
+  let tags = product.tags || [];
+  if (typeof tags === "string") tags = [tags];
+  const hay = [
+    ...["title", "handle", "vendor", "product_type"].map((k) => String(product[k] || "")),
+    ...tags.map(String),
+    ...(product.variants || []).map((v) => String(v.sku || "")),
+  ].join(" ").toLowerCase();
+  return words.every((w) => hay.includes(w));
 }
